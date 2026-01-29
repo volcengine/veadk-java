@@ -27,13 +27,46 @@ public class EnvUtil {
     private static final String TLS_REGION = "OBSERVABILITY_OPENTELEMETRY_TLS_REGION";
     private static final String VIKINGMEM_MEMORY_TYPE = "DATABASE_VIKINGMEM_MEMORY_TYPE";
     private static final String MODEL_AGENT_API_KEY = "MODEL_AGENT_API_KEY";
+    private static final String TOOL_CODE_SANDBOX_URL = "TOOL_CODE_SANDBOX_URL";
+    private static final String AGENTKIT_TOOL_ID = "AGENTKIT_TOOL_ID";
+    private static final String AGENTKIT_TOOL_SERVICE = "AGENTKIT_TOOL_SERVICE_CODE";
+    private static final String AGENTKIT_TOOL_REGION = "AGENTKIT_TOOL_REGION";
+    private static final String AGENTKIT_TOOL_HOST = "AGENTKIT_TOOL_HOST";
 
     // default value
     private static final String DEFAULT_TLS_ENDPONT = "https://tls-cn-beijing.volces.com:4317";
     private static final String DEFAULT_TLS_REGION = "cn-beijing";
     private static final String DEFAULT_VIKING_MEMORY_TYPE = "sys_event_v1";
+    private static final String DEFAULT_AGENTKIT_SERVICE = "agentkit";
+    private static final String DEFAULT_AGENTKIT_REGION = "cn-beijing";
 
     private EnvUtil() {}
+
+    public static String getAgentKitToolId() {
+        String toolId = System.getenv(AGENTKIT_TOOL_ID);
+        if (StringUtils.isBlank(toolId)) {
+            throw getIllegalStateException(AGENTKIT_TOOL_ID);
+        }
+        return toolId;
+    }
+
+    public static String getAgentKitService() {
+        String service = System.getenv(AGENTKIT_TOOL_SERVICE);
+        return StringUtils.isBlank(service) ? DEFAULT_AGENTKIT_SERVICE : service;
+    }
+
+    public static String getAgentKitRegion() {
+        String region = System.getenv(AGENTKIT_TOOL_REGION);
+        return StringUtils.isBlank(region) ? DEFAULT_AGENTKIT_REGION : region;
+    }
+
+    public static String getAgentKitHost() {
+        String host = System.getenv(AGENTKIT_TOOL_HOST);
+        if (StringUtils.isBlank(host)) {
+            return getAgentKitService() + "." + getAgentKitRegion() + ".volces.com";
+        }
+        return host;
+    }
 
     public static String getAgentApiKey() {
         String apiKey = System.getenv(MODEL_AGENT_API_KEY);
@@ -89,6 +122,14 @@ public class EnvUtil {
             return DEFAULT_VIKING_MEMORY_TYPE;
         }
         return memoryType;
+    }
+
+    public static String getCodeSandboxUrl() {
+        String url = System.getenv(TOOL_CODE_SANDBOX_URL);
+        if (StringUtils.isBlank(url)) {
+            throw getIllegalStateException(TOOL_CODE_SANDBOX_URL);
+        }
+        return url;
     }
 
     private static IllegalStateException getIllegalStateException(String configName) {

@@ -24,18 +24,17 @@ import com.volcengine.veadk.agent.SaveSessionToMemoryCallback;
 import com.volcengine.veadk.knowledgebase.viking.VikingKnowledgebaseService;
 import com.volcengine.veadk.model.ArkLlm;
 import com.volcengine.veadk.tools.knowledgebase.LoadKnowledgebaseTool;
+import com.volcengine.veadk.tools.sandbox.RunCodeTool;
 import com.volcengine.veadk.tools.websearch.WebSearchTool;
 import java.util.Map;
 
 public class ArkAgent {
 
     public static BaseAgent ROOT_AGENT = initAgent();
-    // public static BaseAgent ROOT_AGENT = initAgentWithVeTools();
+    //     public static BaseAgent ROOT_AGENT = initAgentWithVeTools();
 
     private static final String appName = "ark_agent";
-    private static final String modelId = "doubao-seed-1-8-preview-251115";
-
-    // private static final String modelId = "deepseek-v3-2-251201";
+    private static final String modelId = "doubao-seed-1-8-251228";
 
     private static BaseAgent initAgent() {
         return LlmAgent.builder()
@@ -80,7 +79,9 @@ public class ArkAgent {
                         // enable knowledgebase tool
                         new LoadKnowledgebaseTool(new VikingKnowledgebaseService(appName)),
                         // enable memory tool
-                        new LoadMemoryTool())
+                        new LoadMemoryTool(),
+                        // enable runcode tool
+                        new RunCodeTool())
                 .afterAgentCallback(new SaveSessionToMemoryCallback())
                 .build();
     }

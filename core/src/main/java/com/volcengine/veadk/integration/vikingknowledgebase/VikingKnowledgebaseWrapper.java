@@ -152,7 +152,7 @@ public class VikingKnowledgebaseWrapper extends BaseServiceImpl {
                 log.error(
                         "GetCollection request:{}, raw response:{}",
                         bodyStr,
-                        response.getException());
+                        response.getException().getMessage());
                 return false;
             }
 

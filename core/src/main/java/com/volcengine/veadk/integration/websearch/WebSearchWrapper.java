@@ -106,14 +106,18 @@ public class WebSearchWrapper extends BaseServiceImpl {
 
         String bodyStr = JSONUtil.toJson(body);
         RawResponse response = json("WebSearch", WEBSEARCH_PARAMS, bodyStr);
+        if (response.getCode() != SdkError.SUCCESS.getNumber()) {
+            log.error(
+                    "WebSearch request:{}, raw response:{}",
+                    bodyStr,
+                    response.getException().getMessage());
+            throw response.getException();
+        }
+
         log.debug(
                 "WebSearch request:{}, raw response:{}",
                 bodyStr,
                 JSONUtil.parseJson(response.getData()));
-
-        if (response.getCode() != SdkError.SUCCESS.getNumber()) {
-            throw response.getException();
-        }
 
         return extractSummaries(JSONUtil.parseJson(response.getData()));
     }
