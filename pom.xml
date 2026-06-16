@@ -20,7 +20,7 @@ limitations under the License.
 
     <groupId>com.volcengine.veadk</groupId>
     <artifactId>veadk-parent</artifactId>
-    <version>0.0.1</version>
+    <version>0.0.2</version>
     <packaging>pom</packaging>
 
     <name>Volcengine Agent Development Kit Maven Parent POM</name>
