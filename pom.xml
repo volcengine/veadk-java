@@ -20,7 +20,7 @@ limitations under the License.
 
     <groupId>com.volcengine.veadk</groupId>
     <artifactId>veadk-parent</artifactId>
-    <version>0.0.1</version>
+    <version>0.0.2</version>
     <packaging>pom</packaging>
 
     <name>Volcengine Agent Development Kit Maven Parent POM</name>
@@ -59,6 +59,7 @@ limitations under the License.
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 
         <google.adk.version>0.4.0</google.adk.version>
+        <opentelemetry.version>1.62.0</opentelemetry.version>
         <ark.sdk.version>0.2.48</ark.sdk.version>
         <volc.sdk.version>1.0.250</volc.sdk.version>
         <jackson.version>2.18.2</jackson.version>
@@ -84,6 +85,16 @@ limitations under the License.
 
     <dependencyManagement>
         <dependencies>
+            <!-- OpenTelemetry BOM: pin SDK/API to >= 1.62.0, overriding the
+                 version brought in transitively by google-adk. Declared first
+                 so it takes precedence over transitively-managed versions. -->
+            <dependency>
+                <groupId>io.opentelemetry</groupId>
+                <artifactId>opentelemetry-bom</artifactId>
+                <version>${opentelemetry.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
             <!-- The ADK core dependency -->
             <dependency>
                 <groupId>com.google.adk</groupId>
