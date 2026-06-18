@@ -103,5 +103,9 @@ Start command:
 - Unable to access memory/knowledgebase/search services: check AK/SK and network connectivity.
 - Port occupied: if port `8000` is occupied, adjust via `--server.port` or in the startup parameters of `AdkWeb.main`.
 
+## Security and privacy
+This project takes security seriously.
+For vulnerability reporting and supported versions, see [SECURITY.md](SECURITY.md)
+
 ## License
 This project uses the Apache License 2.0; see the `LICENSE` file for details.
