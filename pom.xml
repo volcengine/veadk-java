@@ -50,6 +50,7 @@ limitations under the License.
 
     <modules>
         <module>core</module>
+        <module>memory-sqlite</module>
         <module>example</module>
     </modules>
 
@@ -63,11 +64,14 @@ limitations under the License.
         <ark.sdk.version>0.2.48</ark.sdk.version>
         <volc.sdk.version>1.0.250</volc.sdk.version>
         <jackson.version>2.18.2</jackson.version>
+        <snakeyaml.version>2.4</snakeyaml.version>
         <slf4j-api.version>2.0.16</slf4j-api.version>
         <junit.version>5.8.2</junit.version>
         <assertj-core.version>3.23.1</assertj-core.version>
         <junit-pioneer.version>1.7.1</junit-pioneer.version>
         <mockito.version>4.5.1</mockito.version>
+        <byte-buddy.version>1.12.9</byte-buddy.version>
+        <sqlite-jdbc.version>3.50.3.0</sqlite-jdbc.version>
 
         <maven-compiler-plugin.version>3.13.0</maven-compiler-plugin.version>
         <maven-surefire-plugin.version>3.5.2</maven-surefire-plugin.version>
@@ -124,6 +128,16 @@ limitations under the License.
                 <artifactId>jackson-core</artifactId>
                 <version>${jackson.version}</version>
             </dependency>
+            <dependency>
+                <groupId>org.yaml</groupId>
+                <artifactId>snakeyaml</artifactId>
+                <version>${snakeyaml.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.xerial</groupId>
+                <artifactId>sqlite-jdbc</artifactId>
+                <version>${sqlite-jdbc.version}</version>
+            </dependency>
             <!-- log -->
             <dependency>
                 <groupId>org.slf4j</groupId>
@@ -171,6 +185,12 @@ limitations under the License.
                 <groupId>org.mockito</groupId>
                 <artifactId>mockito-junit-jupiter</artifactId>
                 <version>${mockito.version}</version>
+                <scope>test</scope>
+            </dependency>
+            <dependency>
+                <groupId>net.bytebuddy</groupId>
+                <artifactId>byte-buddy-agent</artifactId>
+                <version>${byte-buddy.version}</version>
                 <scope>test</scope>
             </dependency>
         </dependencies>

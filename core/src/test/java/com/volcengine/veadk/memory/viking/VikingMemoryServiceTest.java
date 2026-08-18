@@ -2,6 +2,7 @@ package com.volcengine.veadk.memory.viking;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
@@ -10,12 +11,14 @@ import com.google.adk.memory.MemoryEntry;
 import com.google.adk.sessions.Session;
 import com.google.genai.types.Content;
 import com.google.genai.types.Part;
+import com.volcengine.veadk.integration.vikingmemory.Message;
 import com.volcengine.veadk.integration.vikingmemory.Metadata;
 import com.volcengine.veadk.integration.vikingmemory.VikingMemoryWrapper;
 import com.volcengine.veadk.utils.EnvUtil;
 import io.reactivex.rxjava3.observers.TestObserver;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -278,6 +281,50 @@ class VikingMemoryServiceTest {
             @SuppressWarnings("unchecked")
             List<String> eventTypes = eventTypesCaptor.getValue();
             assertEquals(List.of("sys_event_v1", "user_event_v1"), eventTypes);
+        }
+    }
+
+    @Test
+    void backendContractKeepsLegacyVikingServiceUsable() throws Exception {
+        String appName = "AppMem";
+        try (MockedStatic<EnvUtil> mockedEnv = Mockito.mockStatic(EnvUtil.class);
+                MockedConstruction<VikingMemoryWrapper> mockedCtor =
+                        Mockito.mockConstruction(
+                                VikingMemoryWrapper.class,
+                                (mock, context) -> {
+                                    Mockito.when(mock.isCollectionExists(appName)).thenReturn(true);
+                                    Mockito.when(
+                                                    mock.addSession(
+                                                            Mockito.eq(appName),
+                                                            Mockito.anyList(),
+                                                            Mockito.any(Metadata.class)))
+                                            .thenReturn(true);
+                                })) {
+            mockedEnv.when(EnvUtil::getAccessKey).thenReturn("ak");
+            mockedEnv.when(EnvUtil::getSecretKey).thenReturn("sk");
+            mockedEnv.when(EnvUtil::getVikingMmemoryType).thenReturn("sys_event_v1");
+            VikingMemoryService service = new VikingMemoryService(appName);
+
+            boolean saved =
+                    service.saveMemory(
+                            "user-1",
+                            List.of(
+                                    "{\"role\":\"model\",\"parts\":[{\"text\":\"first\"},{\"text\":\"second\"}]}"),
+                            Map.of());
+
+            assertTrue(saved);
+            assertEquals(appName, service.index());
+            VikingMemoryWrapper wrapperMock = mockedCtor.constructed().get(0);
+            ArgumentCaptor<List> messagesCaptor = ArgumentCaptor.forClass(List.class);
+            verify(wrapperMock)
+                    .addSession(
+                            Mockito.eq(appName),
+                            messagesCaptor.capture(),
+                            Mockito.any(Metadata.class));
+            @SuppressWarnings("unchecked")
+            List<Message> messages = messagesCaptor.getValue();
+            assertEquals("assistant", messages.get(0).getRole());
+            assertEquals("first\nsecond", messages.get(0).getContent());
         }
     }
 }
