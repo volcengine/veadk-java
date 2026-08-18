@@ -15,6 +15,7 @@
  */
 package com.volcengine.veadk.memory.viking;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.google.adk.memory.BaseMemoryService;
 import com.google.adk.memory.MemoryEntry;
 import com.google.adk.memory.SearchMemoryResponse;
@@ -22,15 +23,20 @@ import com.google.adk.sessions.Session;
 import com.volcengine.veadk.integration.vikingmemory.Message;
 import com.volcengine.veadk.integration.vikingmemory.Metadata;
 import com.volcengine.veadk.integration.vikingmemory.VikingMemoryWrapper;
+import com.volcengine.veadk.memory.LongTermMemoryBackend;
 import com.volcengine.veadk.utils.EnvUtil;
+import com.volcengine.veadk.utils.JSONUtil;
 import io.reactivex.rxjava3.core.Completable;
 import io.reactivex.rxjava3.core.Single;
+import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class VikingMemoryService implements BaseMemoryService {
+public class VikingMemoryService implements BaseMemoryService, LongTermMemoryBackend {
 
     private static final Logger log = LoggerFactory.getLogger(VikingMemoryService.class);
 
@@ -114,5 +120,75 @@ public class VikingMemoryService implements BaseMemoryService {
                                     appName, userId, query, topK, this.builtinEventTypes);
                     return SearchMemoryResponse.builder().setMemories(memoryEntries).build();
                 });
+    }
+
+    @Override
+    public String index() {
+        return appName;
+    }
+
+    @Override
+    public boolean saveMemory(
+            String userId, List<String> eventStrings, Map<String, Object> options) {
+        List<Message> messages =
+                eventStrings.stream()
+                        .map(VikingMemoryService::toMessage)
+                        .collect(Collectors.toList());
+        if (messages.isEmpty()) {
+            return true;
+        }
+        try {
+            Metadata metadata = new Metadata(userId, "assistant", System.currentTimeMillis());
+            return vikingMemoryWrapper.addSession(appName, messages, metadata);
+        } catch (Exception exception) {
+            throw new IllegalStateException("Unable to save Viking long-term memory", exception);
+        }
+    }
+
+    @Override
+    public List<String> searchMemory(
+            String userId, String query, int requestedTopK, Map<String, Object> options) {
+        try {
+            return vikingMemoryWrapper
+                    .searchMemory(appName, userId, query, requestedTopK, builtinEventTypes)
+                    .stream()
+                    .map(JSONUtil::toJson)
+                    .toList();
+        } catch (Exception exception) {
+            throw new IllegalStateException("Unable to search Viking long-term memory", exception);
+        }
+    }
+
+    private static Message toMessage(String eventString) {
+        try {
+            JsonNode event = JSONUtil.parseJson(eventString);
+            JsonNode content = event.path("content");
+            String role = content.path("role").asText(event.path("role").asText("user"));
+            JsonNode parts = content.has("parts") ? content.path("parts") : event.path("parts");
+            List<String> textParts = new ArrayList<>();
+            if (parts.isArray()) {
+                for (JsonNode part : parts) {
+                    String text = part.isTextual() ? part.asText() : part.path("text").asText("");
+                    if (!text.isBlank()) {
+                        textParts.add(text);
+                    }
+                }
+            }
+            String text = String.join("\n", textParts);
+            if (!text.isBlank()) {
+                return new Message(normalizeRole(role), text);
+            }
+        } catch (IOException exception) {
+            // Plain text is a valid backend input and is handled below.
+        }
+        return new Message("user", eventString);
+    }
+
+    private static String normalizeRole(String role) {
+        return switch (role) {
+            case "assistant", "model" -> "assistant";
+            case "system" -> "system";
+            default -> "user";
+        };
     }
 }

@@ -24,27 +24,40 @@ import com.google.adk.models.LlmResponse;
 import com.google.adk.tools.BaseTool;
 import com.google.common.collect.ImmutableMap;
 import com.google.genai.types.Content;
+import com.google.genai.types.FinishReason;
+import com.google.genai.types.FunctionCall;
 import com.google.genai.types.FunctionDeclaration;
 import com.google.genai.types.FunctionResponse;
+import com.google.genai.types.GenerateContentConfig;
+import com.google.genai.types.GenerateContentResponseUsageMetadata;
 import com.google.genai.types.Part;
 import com.google.genai.types.Schema;
+import com.google.genai.types.VideoMetadata;
+import com.volcengine.ark.runtime.model.Usage;
 import com.volcengine.ark.runtime.model.completion.chat.ChatCompletionChunk;
+import com.volcengine.ark.runtime.model.completion.chat.ChatCompletionContentPart;
 import com.volcengine.ark.runtime.model.completion.chat.ChatCompletionRequest;
 import com.volcengine.ark.runtime.model.completion.chat.ChatCompletionResult;
 import com.volcengine.ark.runtime.model.completion.chat.ChatFunction;
+import com.volcengine.ark.runtime.model.completion.chat.ChatFunctionCall;
 import com.volcengine.ark.runtime.model.completion.chat.ChatMessage;
 import com.volcengine.ark.runtime.model.completion.chat.ChatMessageRole;
 import com.volcengine.ark.runtime.model.completion.chat.ChatTool;
 import com.volcengine.ark.runtime.model.completion.chat.ChatToolCall;
+import com.volcengine.ark.runtime.model.completion.chat.ResponseFormatJSONSchemaJSONSchemaParam;
 import com.volcengine.ark.runtime.service.ArkService;
 import com.volcengine.veadk.utils.EnvUtil;
 import com.volcengine.veadk.utils.JSONUtil;
 import io.reactivex.rxjava3.core.Flowable;
 import java.util.ArrayList;
+import java.util.Base64;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.TreeMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import org.apache.commons.lang3.StringUtils;
@@ -70,6 +83,7 @@ public final class ArkLlm extends BaseLlm {
                     .build();
 
     private final ArkService arkService;
+    private final List<String> fallbacks;
     private ChatCompletionRequest.ChatCompletionRequestThinking thinking = null;
 
     public ArkLlm(String modelName) {
@@ -77,12 +91,86 @@ public final class ArkLlm extends BaseLlm {
     }
 
     public ArkLlm(String modelName, String thinking) {
+        this(modelName, thinking, EnvUtil.getAgentApiKey(), null);
+    }
+
+    public ArkLlm(String modelName, String apiKey, String apiBase) {
+        this(modelName, null, apiKey, apiBase);
+    }
+
+    public ArkLlm(String modelName, String thinking, String apiKey, String apiBase) {
+        this(modelName, thinking, apiKey, apiBase, List.of());
+    }
+
+    public ArkLlm(List<String> modelNames) {
+        this(modelNames, null);
+    }
+
+    public ArkLlm(List<String> modelNames, String thinking) {
+        this(primaryModelName(modelNames), thinking, EnvUtil.getAgentApiKey(), null, modelNames);
+    }
+
+    public ArkLlm(List<String> modelNames, String apiKey, String apiBase) {
+        this(primaryModelName(modelNames), null, apiKey, apiBase, modelNames);
+    }
+
+    public ArkLlm(List<String> modelNames, String thinking, String apiKey, String apiBase) {
+        this(primaryModelName(modelNames), thinking, apiKey, apiBase, modelNames);
+    }
+
+    private ArkLlm(
+            String modelName, String thinking, String apiKey, String apiBase, List<String> models) {
         super(modelName);
-        Objects.requireNonNull(modelName, "modelName must be set.");
-        this.arkService = ArkService.builder().apiKey(EnvUtil.getAgentApiKey()).build();
+        requireModelName(modelName);
+        this.fallbacks = fallbackModelNames(models);
+        ArkService.Builder serviceBuilder =
+                ArkService.builder().apiKey(Objects.requireNonNull(apiKey, "apiKey must be set."));
+        if (StringUtils.isNotBlank(apiBase)) {
+            serviceBuilder.baseUrl(apiBase);
+        }
+        this.arkService = serviceBuilder.build();
         if (StringUtils.isNotBlank(thinking)) {
             this.thinking = new ChatCompletionRequest.ChatCompletionRequestThinking(thinking);
         }
+    }
+
+    public List<String> fallbacks() {
+        return fallbacks;
+    }
+
+    private static String primaryModelName(List<String> modelNames) {
+        Objects.requireNonNull(modelNames, "modelNames must be set.");
+        if (modelNames.isEmpty()) {
+            throw new IllegalArgumentException("modelNames must not be empty");
+        }
+        return requireModelName(modelNames.get(0));
+    }
+
+    private static List<String> fallbackModelNames(List<String> modelNames) {
+        if (modelNames == null || modelNames.size() <= 1) {
+            return List.of();
+        }
+        return modelNames.subList(1, modelNames.size()).stream()
+                .map(ArkLlm::requireModelName)
+                .toList();
+    }
+
+    private static String requireModelName(String modelName) {
+        Objects.requireNonNull(modelName, "modelName must be set.");
+        if (modelName.isBlank()) {
+            throw new IllegalArgumentException("modelName must not be blank");
+        }
+        return modelName;
+    }
+
+    private List<String> modelCandidates(LlmRequest llmRequest) {
+        Optional<String> requestedModel = llmRequest.model().filter(StringUtils::isNotBlank);
+        // ADK's Basic request processor always copies BaseLlm.model() into the request. Treat that
+        // value as the configured primary model so fallbacks remain available in normal Agent runs.
+        if (requestedModel.isPresent() && !requestedModel.get().equals(model())) {
+            return List.of(requestedModel.get());
+        }
+        return Stream.concat(Stream.of(model()), fallbacks.stream()).toList();
     }
 
     /**
@@ -93,19 +181,49 @@ public final class ArkLlm extends BaseLlm {
      */
     @Override
     public Flowable<LlmResponse> generateContent(LlmRequest llmRequest, boolean stream) {
-        // Convert ADK request to Ark request format
-        ChatCompletionRequest arkRequest = toArkRequest(llmRequest);
+        return Flowable.defer(
+                () ->
+                        generateContentWithFallbacks(
+                                llmRequest, stream, modelCandidates(llmRequest), 0));
+    }
+
+    private Flowable<LlmResponse> generateContentWithFallbacks(
+            LlmRequest llmRequest, boolean stream, List<String> modelCandidates, int index) {
+        String modelName = modelCandidates.get(index);
+        ChatCompletionRequest arkRequest = toArkRequest(llmRequest, modelName);
+        Flowable<LlmResponse> attempt =
+                Flowable.defer(() -> generateContentWithModel(arkRequest, stream));
+        AtomicBoolean emittedResponse = new AtomicBoolean(false);
+        return attempt.doOnNext(response -> emittedResponse.set(true))
+                .onErrorResumeNext(
+                        error -> {
+                            if (emittedResponse.get() || index + 1 >= modelCandidates.size()) {
+                                return Flowable.error(error);
+                            }
+                            String nextModel = modelCandidates.get(index + 1);
+                            log.warn(
+                                    "Ark request with model {} failed before emitting a response;"
+                                            + " falling back to {}",
+                                    modelName,
+                                    nextModel,
+                                    error);
+                            return generateContentWithFallbacks(
+                                    llmRequest, stream, modelCandidates, index + 1);
+                        });
+    }
+
+    private Flowable<LlmResponse> generateContentWithModel(
+            ChatCompletionRequest arkRequest, boolean stream) {
         if (stream) {
             log.debug(
                     "Sending streaming generateContent request to model {}", arkRequest.getModel());
-            // Handle streaming response
+            arkRequest.setStreamOptions(
+                    ChatCompletionRequest.ChatCompletionRequestStreamOptions.of(true));
             return generateContentStreaming(arkRequest);
-        } else {
-            log.debug("Sending generateContent request to model {}", arkRequest.getModel());
-            // Handle non-streaming response
-            return Flowable.fromCallable(() -> arkService.createChatCompletion(arkRequest))
-                    .map(this::toLlmResponse);
         }
+        log.debug("Sending generateContent request to model {}", arkRequest.getModel());
+        return Flowable.fromCallable(() -> arkService.createChatCompletion(arkRequest))
+                .map(this::toLlmResponse);
     }
 
     /**
@@ -114,70 +232,64 @@ public final class ArkLlm extends BaseLlm {
      * @return Flowable of LlmResponse objects
      */
     private Flowable<LlmResponse> generateContentStreaming(ChatCompletionRequest arkRequest) {
-        // Get streaming response from Ark service
         io.reactivex.Flowable<ChatCompletionChunk> streamResponse =
                 arkService.streamChatCompletion(arkRequest);
 
         return Flowable.defer(
                 () -> {
-                    // Accumulate complete text response
                     final StringBuilder accumulatedText = new StringBuilder();
-                    // Buffer partial text for incremental responses
                     final StringBuilder partialText = new StringBuilder();
-                    // Hold the last chunk for final processing
-                    final ChatCompletionChunk[] lastChunkHolder = {null};
-                    // Accumulate tool calls if any
-                    final List<ChatToolCall> accumulatedToolCalls = new ArrayList<>();
+                    final Map<Integer, ChatToolCall> accumulatedToolCalls = new TreeMap<>();
+                    final String[] finishReason = {null};
+                    final Usage[] usage = {null};
 
                     return Flowable.fromPublisher(streamResponse)
                             .concatMap(
                                     chunk -> {
-                                        lastChunkHolder[0] = chunk;
                                         log.debug("Raw Ark streaming chunk: {}", chunk);
+                                        if (chunk.getUsage() != null) {
+                                            usage[0] = chunk.getUsage();
+                                        }
+                                        String chunkFinishReason = finishReason(chunk);
+                                        if (StringUtils.isNotBlank(chunkFinishReason)) {
+                                            finishReason[0] = chunkFinishReason;
+                                        }
 
-                                        // Prepare list of responses to emit
                                         List<LlmResponse> responsesToEmit = new ArrayList<>();
-                                        // Process text content from chunk
                                         processTextContent(
                                                 chunk,
                                                 accumulatedText,
                                                 partialText,
                                                 responsesToEmit);
-                                        // Process tool calls from chunk
                                         processToolCalls(chunk, accumulatedToolCalls);
 
-                                        // Handle stop chunk (final chunk)
-                                        if (isStopChunk(chunk)) {
+                                        if (StringUtils.isNotBlank(chunkFinishReason)) {
                                             processStopChunk(partialText, responsesToEmit);
                                         }
 
-                                        // Emit responses if any
                                         if (responsesToEmit.isEmpty()) {
                                             return Flowable.empty();
-                                        } else {
-                                            log.debug("Responses to emit: {}", responsesToEmit);
-                                            return Flowable.fromIterable(responsesToEmit);
                                         }
+                                        log.debug("Responses to emit: {}", responsesToEmit);
+                                        return Flowable.fromIterable(responsesToEmit);
                                     })
                             .concatWith(
                                     Flowable.defer(
                                             () -> {
-                                                // Process final response after stream ends
-                                                ChatCompletionChunk lastChunk = lastChunkHolder[0];
-                                                if (lastChunk == null
-                                                        || accumulatedText.length() == 0) {
+                                                if (StringUtils.isBlank(finishReason[0])
+                                                        || (accumulatedText.isEmpty()
+                                                                && accumulatedToolCalls
+                                                                        .isEmpty())) {
                                                     return Flowable.empty();
                                                 }
-
-                                                if (isStopChunk(lastChunk)) {
-                                                    // Build and emit final aggregated response
-                                                    return Flowable.just(
-                                                            buildFinalResponse(
-                                                                    accumulatedText.toString(),
-                                                                    accumulatedToolCalls));
-                                                }
-
-                                                return Flowable.empty();
+                                                return Flowable.just(
+                                                        buildFinalResponse(
+                                                                accumulatedText.toString(),
+                                                                new ArrayList<>(
+                                                                        accumulatedToolCalls
+                                                                                .values()),
+                                                                finishReason[0],
+                                                                usage[0]));
                                             }));
                 });
     }
@@ -194,18 +306,18 @@ public final class ArkLlm extends BaseLlm {
             StringBuilder accumulatedText,
             StringBuilder partialText,
             List<LlmResponse> responsesToEmit) {
-        // Extract text content from chunk
-        String content = (String) chunk.getChoices().get(0).getMessage().getContent();
+        if (!hasMessageChoice(chunk)) {
+            return;
+        }
+        Object rawContent = chunk.getChoices().get(0).getMessage().getContent();
+        String content = rawContent instanceof String ? (String) rawContent : null;
 
         if (StringUtils.isNotEmpty(content)) {
-            // Add to accumulated text
             accumulatedText.append(content);
-            // Add to partial text buffer
             partialText.append(content);
-            // Emit partial response when buffer exceeds threshold
             if (partialText.length() > 30) {
                 responsesToEmit.add(buildPartialResponse(partialText.toString()));
-                partialText.setLength(0); // Clear buffer
+                partialText.setLength(0);
             }
         }
     }
@@ -228,22 +340,73 @@ public final class ArkLlm extends BaseLlm {
      * @param accumulatedToolCalls List of accumulated tool calls
      */
     private void processToolCalls(
-            ChatCompletionChunk chunk, List<ChatToolCall> accumulatedToolCalls) {
-        // Extract tool calls from chunk
+            ChatCompletionChunk chunk, Map<Integer, ChatToolCall> accumulatedToolCalls) {
+        if (!hasMessageChoice(chunk)) {
+            return;
+        }
         List<ChatToolCall> toolCalls = chunk.getChoices().get(0).getMessage().getToolCalls();
-        if (null != toolCalls && !toolCalls.isEmpty()) {
-            ChatToolCall toolCall = toolCalls.get(0);
-            // If tool call has ID, it's a new tool call
-            if (StringUtils.isNotBlank(toolCall.getId())) {
-                accumulatedToolCalls.add(toolCall);
-            } else {
-                // Otherwise, it's continuation of existing tool call
-                int index = toolCall.getIndex();
-                String arguments =
-                        accumulatedToolCalls.get(index).getFunction().getArguments()
-                                + toolCall.getFunction().getArguments();
-                accumulatedToolCalls.get(index).getFunction().setArguments(arguments);
+        if (toolCalls == null) {
+            return;
+        }
+        for (ChatToolCall toolCall : toolCalls) {
+            if (toolCall == null) {
+                continue;
             }
+            int index = resolveToolCallIndex(toolCall, accumulatedToolCalls);
+            ChatToolCall accumulated =
+                    accumulatedToolCalls.computeIfAbsent(index, unused -> new ChatToolCall());
+            mergeToolCall(accumulated, toolCall);
+        }
+    }
+
+    private int resolveToolCallIndex(
+            ChatToolCall toolCall, Map<Integer, ChatToolCall> accumulatedToolCalls) {
+        if (toolCall.getIndex() != null && toolCall.getIndex() >= 0) {
+            return toolCall.getIndex();
+        }
+        if (StringUtils.isNotBlank(toolCall.getId())) {
+            return accumulatedToolCalls.entrySet().stream()
+                    .filter(entry -> toolCall.getId().equals(entry.getValue().getId()))
+                    .map(Map.Entry::getKey)
+                    .findFirst()
+                    .orElseGet(() -> nextToolCallIndex(accumulatedToolCalls));
+        }
+        return accumulatedToolCalls.size() == 1
+                ? accumulatedToolCalls.keySet().iterator().next()
+                : nextToolCallIndex(accumulatedToolCalls);
+    }
+
+    private int nextToolCallIndex(Map<Integer, ChatToolCall> accumulatedToolCalls) {
+        int index = 0;
+        while (accumulatedToolCalls.containsKey(index)) {
+            index++;
+        }
+        return index;
+    }
+
+    private void mergeToolCall(ChatToolCall target, ChatToolCall fragment) {
+        if (StringUtils.isNotBlank(fragment.getId())) {
+            target.setId(fragment.getId());
+        }
+        if (StringUtils.isNotBlank(fragment.getType())) {
+            target.setType(fragment.getType());
+        }
+        ChatFunctionCall fragmentFunction = fragment.getFunction();
+        if (fragmentFunction == null) {
+            return;
+        }
+        ChatFunctionCall targetFunction = target.getFunction();
+        if (targetFunction == null) {
+            targetFunction = new ChatFunctionCall();
+            target.setFunction(targetFunction);
+        }
+        if (StringUtils.isNotBlank(fragmentFunction.getName())) {
+            targetFunction.setName(fragmentFunction.getName());
+        }
+        if (fragmentFunction.getArguments() != null) {
+            targetFunction.setArguments(
+                    Objects.requireNonNullElse(targetFunction.getArguments(), "")
+                            + fragmentFunction.getArguments());
         }
     }
 
@@ -256,7 +419,7 @@ public final class ArkLlm extends BaseLlm {
         // Emit any remaining partial text
         if (!partialText.isEmpty()) {
             responsesToEmit.add(buildPartialResponse(partialText.toString()));
-            partialText.setLength(0); // Clear buffer
+            partialText.setLength(0);
         }
     }
 
@@ -267,22 +430,26 @@ public final class ArkLlm extends BaseLlm {
      * @return Final LlmResponse object
      */
     private LlmResponse buildFinalResponse(
-            String accumulatedText, List<ChatToolCall> accumulatedToolCalls) {
+            String accumulatedText,
+            List<ChatToolCall> accumulatedToolCalls,
+            String finishReason,
+            Usage usage) {
         List<Part> parts = new ArrayList<>();
-        // Add text part
-        parts.add(Part.fromText(accumulatedText));
+        if (StringUtils.isNotEmpty(accumulatedText)) {
+            parts.add(Part.fromText(accumulatedText));
+        }
 
-        // Add tool call parts if any
         if (!accumulatedToolCalls.isEmpty()) {
             parts.addAll(parseToolCalls(accumulatedToolCalls));
         }
 
-        // Build final response
-        LlmResponse finalAggregatedResponse =
+        LlmResponse.Builder builder =
                 LlmResponse.builder()
                         .content(Content.builder().role("model").parts(parts).build())
-                        .partial(false) // Mark as complete response
-                        .build();
+                        .partial(false);
+        toFinishReason(finishReason).ifPresent(builder::finishReason);
+        toUsageMetadata(usage).ifPresent(builder::usageMetadata);
+        LlmResponse finalAggregatedResponse = builder.build();
         log.debug("finalAggregatedResponse to emit: {}", finalAggregatedResponse);
         return finalAggregatedResponse;
     }
@@ -292,9 +459,16 @@ public final class ArkLlm extends BaseLlm {
      * @param chunk The streaming chunk
      * @return True if chunk is stop chunk, false otherwise
      */
-    private boolean isStopChunk(ChatCompletionChunk chunk) {
-        String finishReason = chunk.getChoices().get(0).getFinishReason();
-        return StringUtils.isNotBlank(finishReason);
+    private String finishReason(ChatCompletionChunk chunk) {
+        return chunk.getChoices() == null || chunk.getChoices().isEmpty()
+                ? null
+                : chunk.getChoices().get(0).getFinishReason();
+    }
+
+    private boolean hasMessageChoice(ChatCompletionChunk chunk) {
+        return chunk.getChoices() != null
+                && !chunk.getChoices().isEmpty()
+                && chunk.getChoices().get(0).getMessage() != null;
     }
 
     /**
@@ -304,43 +478,77 @@ public final class ArkLlm extends BaseLlm {
      */
     private LlmResponse toLlmResponse(ChatCompletionResult arkResponse) {
         log.debug("Raw Ark response:{}", arkResponse);
-        LlmResponse response = null;
 
         // Check finish reason to determine response type
         String finishReason = arkResponse.getChoices().get(0).getFinishReason();
+        List<Part> parts = new ArrayList<>();
+        String text = (String) arkResponse.getChoices().get(0).getMessage().getContent();
+        if (StringUtils.isNotEmpty(text)) {
+            parts.add(Part.fromText(text));
+        }
         if ("tool_calls".equalsIgnoreCase(finishReason)) {
-            // Handle tool call response
-            List<Part> parts = new ArrayList<>();
-
-            // Add text content if any
-            String text = (String) arkResponse.getChoices().get(0).getMessage().getContent();
-            if (StringUtils.isNotEmpty(text)) {
-                parts.add(Part.fromText(text));
-            }
-
             // Add tool call parts
             parts.addAll(
                     parseToolCalls(arkResponse.getChoices().get(0).getMessage().getToolCalls()));
-
-            response =
-                    LlmResponse.builder()
-                            .content(Content.builder().role("model").parts(parts).build())
-                            .build();
-        } else {
-            // Handle regular text response
-            String text = (String) arkResponse.getChoices().get(0).getMessage().getContent();
-            response =
-                    LlmResponse.builder()
-                            .content(
-                                    Content.builder()
-                                            .role("model")
-                                            .parts(Part.fromText(text))
-                                            .build())
-                            .build();
         }
 
+        LlmResponse response = buildLlmResponse(parts, finishReason, arkResponse.getUsage());
         log.debug("LlmResponse:{}", response);
         return response;
+    }
+
+    private LlmResponse buildLlmResponse(String text, String finishReason, Usage usage) {
+        List<Part> parts = new ArrayList<>();
+        if (StringUtils.isNotEmpty(text)) {
+            parts.add(Part.fromText(text));
+        }
+        return buildLlmResponse(parts, finishReason, usage);
+    }
+
+    private LlmResponse buildLlmResponse(List<Part> parts, String finishReason, Usage usage) {
+        LlmResponse.Builder builder =
+                LlmResponse.builder().content(Content.builder().role("model").parts(parts).build());
+        toFinishReason(finishReason).ifPresent(builder::finishReason);
+        toUsageMetadata(usage).ifPresent(builder::usageMetadata);
+        return builder.build();
+    }
+
+    private Optional<FinishReason> toFinishReason(String finishReason) {
+        if (StringUtils.isBlank(finishReason)) {
+            return Optional.empty();
+        }
+        FinishReason.Known known =
+                switch (finishReason.toLowerCase()) {
+                    case "stop", "tool_calls", "function_call" -> FinishReason.Known.STOP;
+                    case "length" -> FinishReason.Known.MAX_TOKENS;
+                    case "content_filter" -> FinishReason.Known.SAFETY;
+                    default -> FinishReason.Known.OTHER;
+                };
+        return Optional.of(new FinishReason(known));
+    }
+
+    private Optional<GenerateContentResponseUsageMetadata> toUsageMetadata(Usage usage) {
+        if (usage == null) {
+            return Optional.empty();
+        }
+        GenerateContentResponseUsageMetadata.Builder builder =
+                GenerateContentResponseUsageMetadata.builder()
+                        .promptTokenCount(toIntTokenCount(usage.getPromptTokens()))
+                        .candidatesTokenCount(toIntTokenCount(usage.getCompletionTokens()))
+                        .totalTokenCount(toIntTokenCount(usage.getTotalTokens()));
+        if (usage.getPromptTokensDetails() != null
+                && usage.getPromptTokensDetails().getCachedTokens() != null) {
+            builder.cachedContentTokenCount(usage.getPromptTokensDetails().getCachedTokens());
+        }
+        if (usage.getCompletionTokensDetails() != null
+                && usage.getCompletionTokensDetails().getReasoningTokens() != null) {
+            builder.thoughtsTokenCount(usage.getCompletionTokensDetails().getReasoningTokens());
+        }
+        return Optional.of(builder.build());
+    }
+
+    private Integer toIntTokenCount(long value) {
+        return Math.toIntExact(Math.min(value, Integer.MAX_VALUE));
     }
 
     /**
@@ -349,9 +557,10 @@ public final class ArkLlm extends BaseLlm {
      * @return ChatCompletionRequest object for Ark API
      */
     private ChatCompletionRequest toArkRequest(LlmRequest llmRequest) {
-        // Determine model name to use
-        String effectiveModelName = llmRequest.model().orElse(model());
+        return toArkRequest(llmRequest, llmRequest.model().orElse(model()));
+    }
 
+    private ChatCompletionRequest toArkRequest(LlmRequest llmRequest, String effectiveModelName) {
         // Build chat messages from request
         List<ChatMessage> messages = buildChatMessages(llmRequest);
 
@@ -367,6 +576,8 @@ public final class ArkLlm extends BaseLlm {
             request.setThinking(thinking);
         }
 
+        llmRequest.config().ifPresent(config -> applyGenerateContentConfig(request, config));
+
         // Add tools if any
         if (llmRequest.tools() != null && !llmRequest.tools().isEmpty()) {
             List<ChatTool> chatTools = buildChatTools(llmRequest);
@@ -376,6 +587,73 @@ public final class ArkLlm extends BaseLlm {
         }
 
         return request;
+    }
+
+    private void applyGenerateContentConfig(
+            ChatCompletionRequest request, GenerateContentConfig config) {
+        config.temperature().map(Float::doubleValue).ifPresent(request::setTemperature);
+        config.topP().map(Float::doubleValue).ifPresent(request::setTopP);
+        config.maxOutputTokens().ifPresent(request::setMaxTokens);
+        config.stopSequences().filter(stop -> !stop.isEmpty()).ifPresent(request::setStop);
+        config.presencePenalty().map(Float::doubleValue).ifPresent(request::setPresencePenalty);
+        config.frequencyPenalty().map(Float::doubleValue).ifPresent(request::setFrequencyPenalty);
+        config.candidateCount().ifPresent(request::setN);
+        config.responseLogprobs().ifPresent(request::setLogprobs);
+        config.logprobs()
+                .ifPresent(
+                        topLogprobs -> {
+                            request.setLogprobs(true);
+                            request.setTopLogprobs(topLogprobs);
+                        });
+        config.responseSchema()
+                .ifPresentOrElse(
+                        schema -> request.setResponseFormat(buildJsonSchemaResponseFormat(schema)),
+                        () ->
+                                config.responseJsonSchema()
+                                        .ifPresentOrElse(
+                                                schema ->
+                                                        request.setResponseFormat(
+                                                                buildJsonSchemaResponseFormat(
+                                                                        schema)),
+                                                () ->
+                                                        applyJsonObjectResponseFormat(
+                                                                request, config)));
+    }
+
+    private ChatCompletionRequest.ChatCompletionRequestResponseFormat buildJsonSchemaResponseFormat(
+            Schema schema) {
+        Map<String, Object> schemaMap =
+                JSONUtil.convertValue(schema, new TypeReference<Map<String, Object>>() {});
+        updateTypeString(schemaMap);
+        ResponseFormatJSONSchemaJSONSchemaParam jsonSchema =
+                new ResponseFormatJSONSchemaJSONSchemaParam(
+                        schema.title().filter(StringUtils::isNotBlank).orElse("response_schema"),
+                        schema.description().orElse(null),
+                        JSONUtil.valueToTree(schemaMap),
+                        true);
+        return new ChatCompletionRequest.ChatCompletionRequestResponseFormat(
+                "json_schema", jsonSchema);
+    }
+
+    private ChatCompletionRequest.ChatCompletionRequestResponseFormat buildJsonSchemaResponseFormat(
+            Object schema) {
+        ResponseFormatJSONSchemaJSONSchemaParam jsonSchema =
+                new ResponseFormatJSONSchemaJSONSchemaParam(
+                        "response_schema", null, JSONUtil.valueToTree(schema), true);
+        return new ChatCompletionRequest.ChatCompletionRequestResponseFormat(
+                "json_schema", jsonSchema);
+    }
+
+    private void applyJsonObjectResponseFormat(
+            ChatCompletionRequest request, GenerateContentConfig config) {
+        config.responseMimeType()
+                .filter(mimeType -> "application/json".equalsIgnoreCase(mimeType))
+                .ifPresent(
+                        unused ->
+                                request.setResponseFormat(
+                                        new ChatCompletionRequest
+                                                .ChatCompletionRequestResponseFormat(
+                                                "json_object")));
     }
 
     /**
@@ -415,12 +693,95 @@ public final class ArkLlm extends BaseLlm {
      */
     private Stream<ChatMessage> buildContentMessages(LlmRequest llmRequest) {
         return llmRequest.contents().stream()
-                .map(
-                        content ->
-                                ChatMessage.builder()
-                                        .role(toArkRole(content.role().orElse("user")))
-                                        .content(extractText(content))
-                                        .build());
+                .flatMap(content -> buildContentMessages(content).stream());
+    }
+
+    private List<ChatMessage> buildContentMessages(Content content) {
+        if (hasFunctionResponsePart(content)) {
+            return buildFunctionResponseMessages(content);
+        }
+        if (hasFunctionCallPart(content)) {
+            return List.of(buildFunctionCallMessage(content));
+        }
+        return List.of(buildContentMessage(content));
+    }
+
+    private ChatMessage buildContentMessage(Content content) {
+        ChatMessage.Builder builder =
+                ChatMessage.builder().role(toArkRole(content.role().orElse("user")));
+        if (hasSupportedMediaPart(content)) {
+            return builder.multiContent(extractContentParts(content)).build();
+        }
+        return builder.content(extractText(content)).build();
+    }
+
+    private boolean hasFunctionResponsePart(Content content) {
+        return content.parts().stream()
+                .flatMap(List::stream)
+                .filter(Objects::nonNull)
+                .anyMatch(part -> part.functionResponse().isPresent());
+    }
+
+    private boolean hasFunctionCallPart(Content content) {
+        return content.parts().stream()
+                .flatMap(List::stream)
+                .filter(Objects::nonNull)
+                .anyMatch(part -> part.functionCall().isPresent());
+    }
+
+    private List<ChatMessage> buildFunctionResponseMessages(Content content) {
+        return content.parts().stream()
+                .flatMap(List::stream)
+                .filter(Objects::nonNull)
+                .flatMap(part -> part.functionResponse().stream())
+                .map(this::buildFunctionResponseMessage)
+                .toList();
+    }
+
+    private ChatMessage buildFunctionResponseMessage(FunctionResponse functionResponse) {
+        ChatMessage.Builder builder =
+                ChatMessage.builder()
+                        .role(ChatMessageRole.TOOL)
+                        .content(functionResponse.response().map(JSONUtil::toJson).orElse("{}"));
+        functionResponse.id().filter(StringUtils::isNotBlank).ifPresent(builder::toolCallId);
+        functionResponse.name().filter(StringUtils::isNotBlank).ifPresent(builder::name);
+        return builder.build();
+    }
+
+    private ChatMessage buildFunctionCallMessage(Content content) {
+        ChatMessage.Builder builder = ChatMessage.builder().role(ChatMessageRole.ASSISTANT);
+        String text = extractText(content);
+        if (StringUtils.isNotEmpty(text)) {
+            builder.content(text);
+        }
+        List<ChatToolCall> toolCalls =
+                content.parts().stream()
+                        .flatMap(List::stream)
+                        .filter(Objects::nonNull)
+                        .flatMap(part -> part.functionCall().stream())
+                        .map(this::toChatToolCall)
+                        .filter(Optional::isPresent)
+                        .map(Optional::get)
+                        .toList();
+        if (!toolCalls.isEmpty()) {
+            builder.toolCalls(toolCalls);
+        }
+        return builder.build();
+    }
+
+    private Optional<ChatToolCall> toChatToolCall(FunctionCall functionCall) {
+        Optional<String> name = functionCall.name().filter(StringUtils::isNotBlank);
+        if (name.isEmpty()) {
+            return Optional.empty();
+        }
+        ChatFunctionCall chatFunctionCall = new ChatFunctionCall();
+        chatFunctionCall.setName(name.get());
+        chatFunctionCall.setArguments(functionCall.args().map(JSONUtil::toJson).orElse("{}"));
+        ChatToolCall chatToolCall = new ChatToolCall();
+        functionCall.id().filter(StringUtils::isNotBlank).ifPresent(chatToolCall::setId);
+        chatToolCall.setType("function");
+        chatToolCall.setFunction(chatFunctionCall);
+        return Optional.of(chatToolCall);
     }
 
     /**
@@ -442,27 +803,49 @@ public final class ArkLlm extends BaseLlm {
      * @return Optional ChatTool object
      */
     private Optional<ChatTool> convertToChatTool(BaseTool tool) {
-        // Get tool parameters schema
-        Optional<Schema> parameters = tool.declaration().flatMap(FunctionDeclaration::parameters);
-        return parameters.map(
-                schema -> {
-                    // Convert schema to map
-                    Map<String, Object> schemaMap =
-                            JSONUtil.convertValue(
-                                    schema, new TypeReference<Map<String, Object>>() {});
+        Optional<FunctionDeclaration> declaration = tool.declaration();
+        if (declaration.isEmpty()) {
+            return Optional.empty();
+        }
+        Map<String, Object> schemaMap =
+                declaration
+                        .get()
+                        .parameters()
+                        .map(
+                                schema ->
+                                        JSONUtil.convertValue(
+                                                schema,
+                                                new TypeReference<Map<String, Object>>() {}))
+                        .orElseGet(
+                                () ->
+                                        declaration
+                                                .get()
+                                                .parametersJsonSchema()
+                                                .map(
+                                                        schema ->
+                                                                JSONUtil.convertValue(
+                                                                        schema,
+                                                                        new TypeReference<
+                                                                                Map<
+                                                                                        String,
+                                                                                        Object>>() {}))
+                                                .orElseGet(
+                                                        () -> {
+                                                            Map<String, Object> emptySchema =
+                                                                    new LinkedHashMap<>();
+                                                            emptySchema.put("type", "object");
+                                                            emptySchema.put(
+                                                                    "properties",
+                                                                    new LinkedHashMap<>());
+                                                            return emptySchema;
+                                                        }));
+        updateTypeString(schemaMap);
 
-                    // Normalize type strings in schema
-                    updateTypeString(schemaMap);
-
-                    // Create chat function
-                    ChatFunction chatFunction = new ChatFunction();
-                    chatFunction.setName(tool.name());
-                    chatFunction.setDescription(tool.description());
-                    chatFunction.setParameters(JSONUtil.valueToTree(schemaMap));
-
-                    // Return chat tool
-                    return new ChatTool("function", chatFunction);
-                });
+        ChatFunction chatFunction = new ChatFunction();
+        chatFunction.setName(tool.name());
+        chatFunction.setDescription(tool.description());
+        chatFunction.setParameters(JSONUtil.valueToTree(schemaMap));
+        return Optional.of(new ChatTool("function", chatFunction));
     }
 
     /**
@@ -499,11 +882,39 @@ public final class ArkLlm extends BaseLlm {
         }
     }
 
-    /**
-     * Extract text content from Content object
-     * @param content The Content object
-     * @return Extracted text
-     */
+    private boolean hasSupportedMediaPart(Content content) {
+        return content.parts().stream()
+                .flatMap(List::stream)
+                .filter(Objects::nonNull)
+                .anyMatch(
+                        part ->
+                                part.inlineData()
+                                                .flatMap(blob -> blob.mimeType())
+                                                .filter(this::isSupportedMediaMimeType)
+                                                .isPresent()
+                                        || part.fileData()
+                                                .flatMap(fileData -> fileData.mimeType())
+                                                .filter(this::isSupportedMediaMimeType)
+                                                .isPresent());
+    }
+
+    private List<ChatCompletionContentPart> extractContentParts(Content content) {
+        List<ChatCompletionContentPart> contentParts = new ArrayList<>();
+        content.parts()
+                .ifPresent(
+                        parts -> {
+                            for (Part part : parts) {
+                                if (part == null) {
+                                    continue;
+                                }
+                                appendTextContentPart(part, contentParts);
+                                appendInlineDataContentPart(part, contentParts);
+                                appendFileDataContentPart(part, contentParts);
+                            }
+                        });
+        return contentParts;
+    }
+
     private String extractText(Content content) {
         StringBuilder textBuilder = new StringBuilder();
         // Use ifPresent with a lambda for a more functional and readable style
@@ -521,6 +932,78 @@ public final class ArkLlm extends BaseLlm {
                             }
                         });
         return textBuilder.toString();
+    }
+
+    private void appendTextContentPart(Part part, List<ChatCompletionContentPart> contentParts) {
+        part.text()
+                .filter(StringUtils::isNotEmpty)
+                .ifPresent(
+                        text ->
+                                contentParts.add(
+                                        ChatCompletionContentPart.builder()
+                                                .type("text")
+                                                .text(text)
+                                                .build()));
+    }
+
+    private void appendInlineDataContentPart(
+            Part part, List<ChatCompletionContentPart> contentParts) {
+        part.inlineData()
+                .filter(blob -> blob.data().isPresent())
+                .flatMap(
+                        blob ->
+                                toMediaContentPart(
+                                        dataUri(
+                                                blob.mimeType().orElse("application/octet-stream"),
+                                                blob.data().get()),
+                                        blob.mimeType().orElse("application/octet-stream"),
+                                        part.videoMetadata()))
+                .ifPresent(contentParts::add);
+    }
+
+    private void appendFileDataContentPart(
+            Part part, List<ChatCompletionContentPart> contentParts) {
+        part.fileData()
+                .filter(fileData -> fileData.fileUri().isPresent())
+                .flatMap(
+                        fileData ->
+                                toMediaContentPart(
+                                        fileData.fileUri().get(),
+                                        fileData.mimeType().orElse("application/octet-stream"),
+                                        part.videoMetadata()))
+                .ifPresent(contentParts::add);
+    }
+
+    private Optional<ChatCompletionContentPart> toMediaContentPart(
+            String url, String mimeType, Optional<VideoMetadata> videoMetadata) {
+        if (mimeType.startsWith("image/")) {
+            return Optional.of(
+                    ChatCompletionContentPart.builder()
+                            .type("image_url")
+                            .imageUrl(
+                                    new ChatCompletionContentPart.ChatCompletionContentPartImageURL(
+                                            url, "auto"))
+                            .build());
+        }
+        if (mimeType.startsWith("video/")) {
+            return Optional.of(
+                    ChatCompletionContentPart.builder()
+                            .type("video_url")
+                            .videoUrl(
+                                    new ChatCompletionContentPart.ChatCompletionContentPartVideoURL(
+                                            url,
+                                            videoMetadata.flatMap(VideoMetadata::fps).orElse(1.0)))
+                            .build());
+        }
+        return Optional.empty();
+    }
+
+    private boolean isSupportedMediaMimeType(String mimeType) {
+        return mimeType.startsWith("image/") || mimeType.startsWith("video/");
+    }
+
+    private String dataUri(String mimeType, byte[] data) {
+        return "data:" + mimeType + ";base64," + Base64.getEncoder().encodeToString(data);
     }
 
     /**
@@ -571,11 +1054,18 @@ public final class ArkLlm extends BaseLlm {
      * @throws JsonProcessingException If JSON parsing fails
      */
     private Part parseToolCallPart(ChatToolCall toolCall) throws JsonProcessingException {
-        return Part.fromFunctionCall(
-                toolCall.getFunction().getName(),
-                JSONUtil.fromJson(
-                        toolCall.getFunction().getArguments(),
-                        new TypeReference<Map<String, Object>>() {}));
+        ChatFunctionCall function = toolCall.getFunction();
+        Map<String, Object> args =
+                StringUtils.isBlank(function.getArguments())
+                        ? Map.of()
+                        : JSONUtil.fromJson(
+                                function.getArguments(),
+                                new TypeReference<Map<String, Object>>() {});
+        FunctionCall.Builder builder = FunctionCall.builder().name(function.getName()).args(args);
+        if (StringUtils.isNotBlank(toolCall.getId())) {
+            builder.id(toolCall.getId());
+        }
+        return Part.builder().functionCall(builder.build()).build();
     }
 
     /**

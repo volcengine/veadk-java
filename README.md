@@ -11,7 +11,7 @@ An open-source Agent development toolkit that integrates the powerful capabiliti
 <dependency>
     <groupId>com.volcengine.veadk</groupId>
     <artifactId>veadk-java</artifactId>
-    <version>0.0.1</version>
+    <version>0.0.2</version>
 </dependency>
 ```
 ```java
@@ -55,6 +55,78 @@ export MODEL_AGENT_API_KEY="<your-ark-api-key>"
 ```
 
 ## Run the Project Examples
+
+### Local Knowledge and Long-term Memory
+
+The backend-neutral local implementations do not require cloud credentials:
+
+```java
+KnowledgeBase knowledgeBase = new KnowledgeBase("docs");
+knowledgeBase.addFromText("VeADK supports deterministic local retrieval.");
+
+LongTermMemory longTermMemory = new LongTermMemory("my_app");
+ShortTermMemory shortTermMemory = new ShortTermMemory();
+Agent agent = Agent.builder()
+    .name("memory-agent")
+    .model(new ArkLlm("doubao-seed-1-8-preview-251115"))
+    .knowledgebase(knowledgeBase)
+    .shortTermMemory(shortTermMemory)
+    .longTermMemory(longTermMemory)
+    .build();
+
+Runner runner = agent.newRunner();
+```
+
+Existing `VikingMemoryService` and `VikingKnowledgebaseService` entry points remain supported.
+
+Ark LLM also accepts an ordered model list for Python-style fallbacks. The first model is tried
+first; later models are only used when an attempt fails before any streaming output is emitted.
+
+```java
+ArkLlm model = new ArkLlm(List.of("doubao-seed-1-8-251228", "deepseek-r1-250528"));
+```
+
+ADK generation config values such as temperature, top-p, max output tokens, stop sequences,
+penalties, candidate count, log probabilities and JSON/JSON-schema response formats are forwarded
+to Ark requests when set. Text, inline image bytes, image URLs and video URLs from ADK `Part`
+values are also mapped into Ark chat content parts. Tool-call history is round-tripped through Ark
+assistant `tool_calls` and tool-result messages, including ids and parallel streaming tool calls.
+
+To automatically copy completed sessions into long-term memory, enable `autoSaveSession` when a
+long-term memory service is configured. The default policy matches Python's thresholds: first save
+immediately, then save after 10 new events or 60 seconds, and flush the previous session when the
+active session changes.
+
+Direct construction of `SaveSessionToMemoryCallback()` keeps the original Java behavior: every
+invocation starts a background save and returns immediately. Use the policy constructor when the
+save must participate in the reactive callback chain.
+
+```java
+Agent agent = Agent.builder()
+    .name("memory-agent")
+    .model(new ArkLlm("doubao-seed-1-8-preview-251115"))
+    .longTermMemory(longTermMemory)
+    .autoSaveSession(true)
+    .build();
+```
+
+For persistent local sessions, add the optional SQLite module:
+
+```xml
+<dependency>
+    <groupId>com.volcengine.veadk</groupId>
+    <artifactId>veadk-memory-sqlite</artifactId>
+    <version>0.0.2</version>
+</dependency>
+```
+
+```java
+ShortTermMemory shortTermMemory = new ShortTermMemory(
+    new SQLiteShortTermMemoryBackend(Path.of("./data/sessions.db")));
+```
+
+The core artifact does not transitively require the SQLite JDBC driver. SQLite appends reload the
+canonical stored session before writing, so stale loaded views do not replace newer history.
 
 ### Build the Project
 In the repository root, run: `./mvnw clean -DskipTests package`
