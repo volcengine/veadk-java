@@ -81,6 +81,7 @@ limitations under the License.
         <central.publishing.maven.version>0.9.0</central.publishing.maven.version>
 
         <argLine>-Xms512m -Xmx1024m</argLine>
+        <okio.version>3.16.4</okio.version>
     </properties>
 
     <dependencyManagement>
@@ -172,6 +173,16 @@ limitations under the License.
                 <artifactId>mockito-junit-jupiter</artifactId>
                 <version>${mockito.version}</version>
                 <scope>test</scope>
+            </dependency>
+            <dependency>
+                <groupId>com.squareup.okio</groupId>
+                <artifactId>okio</artifactId>
+                <version>${okio.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.squareup.okio</groupId>
+                <artifactId>okio-jvm</artifactId>
+                <version>${okio.version}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>
