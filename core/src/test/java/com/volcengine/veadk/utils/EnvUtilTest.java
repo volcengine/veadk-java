@@ -10,6 +10,38 @@ import org.junitpioneer.jupiter.SetEnvironmentVariable;
 class EnvUtilTest {
 
     @Test
+    @SetEnvironmentVariable(
+            key = "OBSERVABILITY_OPENTELEMETRY_APMPLUS_ENDPOINT",
+            value = "http://apmplus:4317")
+    @SetEnvironmentVariable(key = "OBSERVABILITY_OPENTELEMETRY_APMPLUS_API_KEY", value = "test-key")
+    void apmPlusConfiguration_shouldReadRuntimeEnvironment() {
+        assertThat(EnvUtil.isAPMPlusConfigured()).isTrue();
+        assertThat(EnvUtil.getAPMPlusEndpoint()).isEqualTo("http://apmplus:4317");
+        assertThat(EnvUtil.getAPMPlusApiKey()).isEqualTo("test-key");
+    }
+
+    @Test
+    @SetEnvironmentVariable(
+            key = "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
+            value = "http://collector/path/v1/traces")
+    @SetEnvironmentVariable(key = "OTEL_EXPORTER_OTLP_TRACES_PROTOCOL", value = "http/protobuf")
+    @ClearEnvironmentVariable(key = "OBSERVABILITY_OPENTELEMETRY_APMPLUS_ENDPOINT")
+    @ClearEnvironmentVariable(key = "OBSERVABILITY_OPENTELEMETRY_APMPLUS_API_KEY")
+    void apmPlusConfiguration_shouldPreferStandardOtlpEnvironment() {
+        assertThat(EnvUtil.isAPMPlusConfigured()).isTrue();
+        assertThat(EnvUtil.getOpenTelemetryTracesEndpoint())
+                .isEqualTo("http://collector/path/v1/traces");
+        assertThat(EnvUtil.getOpenTelemetryTracesProtocol()).isEqualTo("http/protobuf");
+    }
+
+    @Test
+    @ClearEnvironmentVariable(key = "OBSERVABILITY_OPENTELEMETRY_APMPLUS_SERVICE_NAME")
+    @SetEnvironmentVariable(key = "OTEL_SERVICE_NAME", value = "runtime.agent")
+    void getOpenTelemetryServiceName_shouldUseRuntimeServiceName() {
+        assertThat(EnvUtil.getOpenTelemetryServiceName()).isEqualTo("runtime.agent");
+    }
+
+    @Test
     @SetEnvironmentVariable(key = "MODEL_AGENT_API_KEY", value = "test_api_key")
     void getAgentApiKey() {
         assertThat(EnvUtil.getAgentApiKey()).isEqualTo("test_api_key");

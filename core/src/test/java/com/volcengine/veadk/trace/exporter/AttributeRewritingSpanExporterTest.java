@@ -36,6 +36,7 @@ class AttributeRewritingSpanExporterTest {
                         .build();
 
         SpanData inputSpan = Mockito.mock(SpanData.class);
+        when(inputSpan.getName()).thenReturn("call_llm");
         when(inputSpan.getAttributes()).thenReturn(input);
 
         SpanExporter delegate = Mockito.mock(SpanExporter.class);
@@ -70,9 +71,39 @@ class AttributeRewritingSpanExporterTest {
         assertEquals(List.of(true, false), out.get(AttributeKey.booleanArrayKey("normal.barr")));
         assertEquals(List.of(1L, 2L), out.get(AttributeKey.longArrayKey("normal.larr")));
         assertEquals(List.of(1.1, 2.2), out.get(AttributeKey.doubleArrayKey("normal.darr")));
+        assertEquals("chat", out.get(AttributeKey.stringKey("gen_ai.operation.name")));
+        assertEquals("llm", out.get(AttributeKey.stringKey("gen_ai.span.kind")));
 
         // Attribute count reflects rewritten set
         assertEquals(out.size(), rewritten.getTotalAttributeCount());
+    }
+
+    @Test
+    void export_addsAgentKitPlatformAttributes() {
+        Attributes input =
+                Attributes.builder()
+                        .put("gcp.vertex.agent.tool_call_args", "{\"code\":\"print(1)\"}")
+                        .build();
+        SpanData inputSpan = Mockito.mock(SpanData.class);
+        when(inputSpan.getName()).thenReturn("tool_call [run_code]");
+        when(inputSpan.getAttributes()).thenReturn(input);
+
+        SpanExporter delegate = Mockito.mock(SpanExporter.class);
+        when(delegate.export(anyList())).thenReturn(CompletableResultCode.ofSuccess());
+
+        new AttributeRewritingSpanExporter(delegate).export(List.of(inputSpan));
+
+        ArgumentCaptor<List> captor = ArgumentCaptor.forClass(List.class);
+        verify(delegate).export(captor.capture());
+        SpanData rewritten = (SpanData) captor.getValue().get(0);
+        assertEquals(
+                "execute_tool",
+                rewritten.getAttributes().get(AttributeKey.stringKey("gen_ai.operation.name")));
+        assertEquals(
+                "tool", rewritten.getAttributes().get(AttributeKey.stringKey("gen_ai.span.kind")));
+        assertEquals(
+                "{\"code\":\"print(1)\"}",
+                rewritten.getAttributes().get(AttributeKey.stringKey("gen_ai.input")));
     }
 
     @Test
