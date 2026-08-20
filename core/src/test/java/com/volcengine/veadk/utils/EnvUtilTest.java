@@ -8,6 +8,19 @@ import org.junitpioneer.jupiter.ClearEnvironmentVariable;
 import org.junitpioneer.jupiter.SetEnvironmentVariable;
 
 class EnvUtilTest {
+    @Test
+    @SetEnvironmentVariable(key = "AGENTKIT_TOOL_HOST", value = "agentkit-tool:8711")
+    @ClearEnvironmentVariable(key = "AGENTKIT_TOOL_SCHEME")
+    void getAgentKitScheme_withPlatformHost_shouldDefaultToHttp() {
+        assertThat(EnvUtil.getAgentKitScheme()).isEqualTo("http");
+    }
+
+    @Test
+    @SetEnvironmentVariable(key = "AGENTKIT_TOOL_HOST", value = "agentkit-tool:8711")
+    @SetEnvironmentVariable(key = "AGENTKIT_TOOL_SCHEME", value = "https")
+    void getAgentKitScheme_withExplicitScheme_shouldUseConfiguredValue() {
+        assertThat(EnvUtil.getAgentKitScheme()).isEqualTo("https");
+    }
 
     @Test
     @SetEnvironmentVariable(key = "MODEL_AGENT_API_KEY", value = "test_api_key")
@@ -19,6 +32,18 @@ class EnvUtilTest {
     @ClearEnvironmentVariable(key = "MODEL_AGENT_API_KEY")
     void getAgentApiKey_withMissingEnv_shouldThrowException() {
         assertThatThrownBy(EnvUtil::getAgentApiKey).isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    @SetEnvironmentVariable(key = "MODEL_AGENT_API_BASE", value = "http://modelcenter:6789")
+    void getAgentApiBase() {
+        assertThat(EnvUtil.getAgentApiBase()).isEqualTo("http://modelcenter:6789");
+    }
+
+    @Test
+    @ClearEnvironmentVariable(key = "MODEL_AGENT_API_BASE")
+    void getAgentApiBase_withMissingEnv_shouldReturnNull() {
+        assertThat(EnvUtil.getAgentApiBase()).isNull();
     }
 
     @Test

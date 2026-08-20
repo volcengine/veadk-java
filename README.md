@@ -85,6 +85,36 @@ Start command:
 
 - Access URL: `http://localhost:8000`
 
+### RunCode Sandbox Example
+
+`RunCodeAgent` exposes a separate `run_code_agent` application and registers only the
+`run_code` tool. In AgentKit Runtime, bind a Sandbox tool to the Runtime so the platform injects
+`AGENTKIT_TOOL_ID` and mounts its IAM role credential file.
+
+For local or public-cloud execution, configure long-lived credentials explicitly:
+
+```bash
+export AGENTKIT_TOOL_ID="<your-sandbox-tool-id>"
+export VOLCENGINE_ACCESS_KEY="<your-access-key>"
+export VOLCENGINE_SECRET_KEY="<your-secret-key>"
+```
+
+For hybrid cloud, the Runtime normally injects these values automatically:
+
+```text
+AGENTKIT_TOOL_ID
+AGENTKIT_TOOL_HOST
+AGENTKIT_TOOL_REGION
+FAAS_IAM_ROLE_CREDENTIAL_PATH
+```
+
+Hybrid-cloud tool hosts on port `8711` (or under `.vestack.cloud`) default to HTTP. Set
+`AGENTKIT_TOOL_SCHEME` explicitly if the environment uses a different scheme. The IAM credential
+file is read for every tool call so refreshed STS credentials are used.
+
+After starting the ADK web server, create a session for `run_code_agent` and ask it to execute
+code, for example: `Use Python and the run_code tool to calculate the 100th Fibonacci number.`
+
 ### Run in IDE
 - Import the Maven multi-module project using IntelliJ IDEA or Eclipse.
 - Directly run the `main` method of `AgentCliRunner` or `AdkWeb`.

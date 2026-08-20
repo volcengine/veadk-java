@@ -17,9 +17,12 @@ import com.volcengine.veadk.utils.EnvUtil;
 import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
+import org.junitpioneer.jupiter.SetEnvironmentVariable;
 import org.mockito.MockedConstruction;
 import org.mockito.MockedStatic;
 
+@SetEnvironmentVariable(key = "VOLCENGINE_ACCESS_KEY", value = "ak")
+@SetEnvironmentVariable(key = "VOLCENGINE_SECRET_KEY", value = "sk")
 class RunCodeToolTest {
 
     @Test
@@ -117,6 +120,7 @@ class RunCodeToolTest {
         envUtilMock.when(EnvUtil::getAgentKitService).thenReturn("agentkit");
         envUtilMock.when(EnvUtil::getAgentKitRegion).thenReturn("cn-beijing");
         envUtilMock.when(EnvUtil::getAgentKitHost).thenReturn("host.com");
+        envUtilMock.when(EnvUtil::getAgentKitScheme).thenReturn("https");
         envUtilMock.when(EnvUtil::getAccessKey).thenReturn("ak");
         envUtilMock.when(EnvUtil::getSecretKey).thenReturn("sk");
     }

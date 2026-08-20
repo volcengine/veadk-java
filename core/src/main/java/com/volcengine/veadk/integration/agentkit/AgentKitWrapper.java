@@ -30,23 +30,24 @@ public class AgentKitWrapper extends BaseServiceImpl {
 
     private static final String ACTION_INVOKE_TOOL = "InvokeTool";
 
-    private static final ServiceInfo SERVICE_INFO =
-            new ServiceInfo(
-                    new HashMap<String, Object>() {
-                        {
-                            put(Const.CONNECTION_TIMEOUT, 5000);
-                            put(Const.SOCKET_TIMEOUT, 30000); // Sandbox might be slow
-                            put(Const.Scheme, "https");
-                            put(
-                                    Const.Header,
-                                    new ArrayList<Header>() {
-                                        {
-                                            add(new BasicHeader("Accept", "application/json"));
-                                        }
-                                    });
-                            put(Const.Credentials, new Credentials("cn-beijing", "agentkit"));
-                        }
-                    });
+    private static ServiceInfo createServiceInfo(String scheme) {
+        return new ServiceInfo(
+                new HashMap<String, Object>() {
+                    {
+                        put(Const.CONNECTION_TIMEOUT, 5000);
+                        put(Const.SOCKET_TIMEOUT, 30000); // Sandbox might be slow
+                        put(Const.Scheme, scheme);
+                        put(
+                                Const.Header,
+                                new ArrayList<Header>() {
+                                    {
+                                        add(new BasicHeader("Accept", "application/json"));
+                                    }
+                                });
+                        put(Const.Credentials, new Credentials("cn-beijing", "agentkit"));
+                    }
+                });
+    }
 
     private static final Map<String, ApiInfo> API_INFO_LIST =
             new HashMap<String, ApiInfo>() {
@@ -77,9 +78,17 @@ public class AgentKitWrapper extends BaseServiceImpl {
                     new BasicNameValuePair("Version", "2025-10-30"));
 
     public AgentKitWrapper(String host, String region, String ak, String sk) {
-        super(SERVICE_INFO, API_INFO_LIST);
+        this("https", host, region, ak, sk, null);
+    }
+
+    public AgentKitWrapper(
+            String scheme, String host, String region, String ak, String sk, String sessionToken) {
+        super(createServiceInfo(scheme), API_INFO_LIST);
         this.setAccessKey(ak);
         this.setSecretKey(sk);
+        if (sessionToken != null && !sessionToken.isBlank()) {
+            this.setSessionToken(sessionToken);
+        }
         this.setHost(host);
         this.getServiceInfo().setHost(host);
         this.setRegion(region);
@@ -109,24 +118,28 @@ public class AgentKitWrapper extends BaseServiceImpl {
             RawResponse response = json(ACTION_INVOKE_TOOL, INVOKETOOL_PARAMS, bodyStr);
             if (response.getCode() != SdkError.SUCCESS.getNumber()) {
                 log.error(
-                        "InvokeTool request:{}, raw response:{}",
-                        bodyStr,
-                        response.getException().getMessage());
+                        "AgentKit InvokeTool failed: toolId={}, operationType=RunCode,"
+                                + " errorCode={}",
+                        toolId,
+                        response.getCode());
                 throw response.getException();
             }
-            log.debug(
-                    "InvokeTool request:{}, raw response:{}",
-                    bodyStr,
-                    JSONUtil.parseJson(response.getData()));
 
             // Parse response to get "Result"
             JsonNode rootNode = JSONUtil.parseJson(response.getData());
+            String requestId = rootNode.path("ResponseMetadata").path("RequestId").asText("");
+            log.debug(
+                    "AgentKit InvokeTool succeeded: toolId={}, operationType=RunCode, requestId={}",
+                    toolId,
+                    requestId);
             JsonNode resultNode = rootNode.path("Result").path("Result");
 
             if (!resultNode.isMissingNode()) {
                 return resultNode.asText();
             }
-            return rootNode.toString();
+            throw new IllegalStateException(
+                    "AgentKit InvokeTool response is missing Result.Result, requestId="
+                            + requestId);
         } catch (Exception e) {
             throw new RuntimeException("Failed to run code via AgentKit", e);
         }

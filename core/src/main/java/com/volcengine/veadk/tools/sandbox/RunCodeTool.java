@@ -6,6 +6,7 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.genai.types.FunctionDeclaration;
 import com.google.genai.types.Schema;
+import com.volcengine.veadk.integration.agentkit.AgentKitCredential;
 import com.volcengine.veadk.integration.agentkit.AgentKitWrapper;
 import com.volcengine.veadk.utils.EnvUtil;
 import io.reactivex.rxjava3.core.Single;
@@ -22,7 +23,6 @@ import org.slf4j.LoggerFactory;
 public class RunCodeTool extends BaseTool {
 
     private static final Logger logger = LoggerFactory.getLogger(RunCodeTool.class);
-    private final AgentKitWrapper agentKitWrapper;
 
     public RunCodeTool() {
         super(
@@ -31,12 +31,6 @@ public class RunCodeTool extends BaseTool {
                     + " directly, compile and execute via Python; write sources and object files to"
                     + " /tmp.",
                 false);
-        this.agentKitWrapper =
-                new AgentKitWrapper(
-                        EnvUtil.getAgentKitHost(),
-                        EnvUtil.getAgentKitRegion(),
-                        EnvUtil.getAccessKey(),
-                        EnvUtil.getSecretKey());
     }
 
     @Override
@@ -102,6 +96,15 @@ public class RunCodeTool extends BaseTool {
 
         try {
             String toolId = EnvUtil.getAgentKitToolId();
+            AgentKitCredential credential = AgentKitCredential.load();
+            AgentKitWrapper agentKitWrapper =
+                    new AgentKitWrapper(
+                            EnvUtil.getAgentKitScheme(),
+                            EnvUtil.getAgentKitHost(),
+                            EnvUtil.getAgentKitRegion(),
+                            credential.accessKey(),
+                            credential.secretKey(),
+                            credential.sessionToken());
             String output = agentKitWrapper.runCode(toolId, sessionId, code, language, timeout);
             return ImmutableMap.of("result", output);
         } catch (Exception e) {
