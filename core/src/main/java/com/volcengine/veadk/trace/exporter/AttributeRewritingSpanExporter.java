@@ -71,10 +71,6 @@ public class AttributeRewritingSpanExporter implements SpanExporter {
         }
 
         private Attributes rewriteAttributes(Attributes attributes) {
-            if (attributes.isEmpty()) {
-                return attributes;
-            }
-
             AttributesBuilder builder = Attributes.builder();
             attributes.forEach(
                     (key, value) -> {
@@ -123,7 +119,62 @@ public class AttributeRewritingSpanExporter implements SpanExporter {
                                 break;
                         }
                     });
+            addPlatformAttributes(builder, delegate.getName(), attributes);
             return builder.build();
+        }
+
+        private void addPlatformAttributes(
+                AttributesBuilder builder, String spanName, Attributes originalAttributes) {
+            if (spanName == null) {
+                return;
+            }
+            if (spanName.startsWith("invocation")) {
+                builder.put("gen_ai.operation.name", "chain");
+                builder.put("gen_ai.span.kind", "workflow");
+            } else if (spanName.startsWith("agent_run") || spanName.startsWith("invoke_agent")) {
+                builder.put("gen_ai.operation.name", "agent");
+                builder.put("gen_ai.span.kind", "agent");
+            } else if (spanName.startsWith("call_llm")) {
+                builder.put("gen_ai.operation.name", "chat");
+                builder.put("gen_ai.span.kind", "llm");
+                copyStringAttribute(
+                        builder,
+                        originalAttributes,
+                        "gcp.vertex.agent.llm_request",
+                        "gen_ai.input");
+                copyStringAttribute(
+                        builder,
+                        originalAttributes,
+                        "gcp.vertex.agent.llm_response",
+                        "gen_ai.output");
+            } else if (spanName.startsWith("tool_call")) {
+                builder.put("gen_ai.operation.name", "execute_tool");
+                builder.put("gen_ai.span.kind", "tool");
+                copyStringAttribute(
+                        builder,
+                        originalAttributes,
+                        "gcp.vertex.agent.tool_call_args",
+                        "gen_ai.input");
+            } else if (spanName.startsWith("tool_response")) {
+                builder.put("gen_ai.operation.name", "execute_tool");
+                builder.put("gen_ai.span.kind", "tool");
+                copyStringAttribute(
+                        builder,
+                        originalAttributes,
+                        "gcp.vertex.agent.tool_response",
+                        "gen_ai.output");
+            }
+        }
+
+        private void copyStringAttribute(
+                AttributesBuilder builder,
+                Attributes originalAttributes,
+                String sourceKey,
+                String targetKey) {
+            String value = originalAttributes.get(AttributeKey.stringKey(sourceKey));
+            if (value != null) {
+                builder.put(targetKey, value);
+            }
         }
 
         @Override

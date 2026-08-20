@@ -25,6 +25,16 @@ public class EnvUtil {
     private static final String TLS_ENDPOINT = "OBSERVABILITY_OPENTELEMETRY_TLS_ENDPOINT";
     private static final String TLS_SERVICE_NAME = "OBSERVABILITY_OPENTELEMETRY_TLS_SERVICE_NAME";
     private static final String TLS_REGION = "OBSERVABILITY_OPENTELEMETRY_TLS_REGION";
+    private static final String APMPLUS_ENDPOINT = "OBSERVABILITY_OPENTELEMETRY_APMPLUS_ENDPOINT";
+    private static final String APMPLUS_API_KEY = "OBSERVABILITY_OPENTELEMETRY_APMPLUS_API_KEY";
+    private static final String APMPLUS_SERVICE_NAME =
+            "OBSERVABILITY_OPENTELEMETRY_APMPLUS_SERVICE_NAME";
+    private static final String OTEL_SERVICE_NAME = "OTEL_SERVICE_NAME";
+    private static final String OTEL_RESOURCE_ATTRIBUTES = "OTEL_RESOURCE_ATTRIBUTES";
+    private static final String OTEL_EXPORTER_OTLP_TRACES_ENDPOINT =
+            "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT";
+    private static final String OTEL_EXPORTER_OTLP_TRACES_PROTOCOL =
+            "OTEL_EXPORTER_OTLP_TRACES_PROTOCOL";
     private static final String VIKINGMEM_MEMORY_TYPE = "DATABASE_VIKINGMEM_MEMORY_TYPE";
     private static final String MODEL_AGENT_API_KEY = "MODEL_AGENT_API_KEY";
     private static final String TOOL_CODE_SANDBOX_URL = "TOOL_CODE_SANDBOX_URL";
@@ -39,6 +49,7 @@ public class EnvUtil {
     private static final String DEFAULT_VIKING_MEMORY_TYPE = "sys_event_v1";
     private static final String DEFAULT_AGENTKIT_SERVICE = "agentkit";
     private static final String DEFAULT_AGENTKIT_REGION = "cn-beijing";
+    private static final String DEFAULT_AGENTKIT_SCHEME = "https";
 
     private EnvUtil() {}
 
@@ -114,6 +125,48 @@ public class EnvUtil {
             return DEFAULT_TLS_REGION;
         }
         return tlsRegion;
+    }
+
+    public static boolean isAPMPlusConfigured() {
+        return StringUtils.isNotBlank(getOpenTelemetryTracesEndpoint())
+                || (StringUtils.isNotBlank(System.getenv(APMPLUS_ENDPOINT))
+                        && StringUtils.isNotBlank(System.getenv(APMPLUS_API_KEY)));
+    }
+
+    public static String getOpenTelemetryTracesEndpoint() {
+        return System.getenv(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT);
+    }
+
+    public static String getOpenTelemetryTracesProtocol() {
+        return System.getenv(OTEL_EXPORTER_OTLP_TRACES_PROTOCOL);
+    }
+
+    public static String getAPMPlusEndpoint() {
+        String endpoint = System.getenv(APMPLUS_ENDPOINT);
+        if (StringUtils.isBlank(endpoint)) {
+            throw getIllegalStateException(APMPLUS_ENDPOINT);
+        }
+        return endpoint;
+    }
+
+    public static String getAPMPlusApiKey() {
+        String apiKey = System.getenv(APMPLUS_API_KEY);
+        if (StringUtils.isBlank(apiKey)) {
+            throw getIllegalStateException(APMPLUS_API_KEY);
+        }
+        return apiKey;
+    }
+
+    public static String getOpenTelemetryServiceName() {
+        String serviceName = System.getenv(APMPLUS_SERVICE_NAME);
+        if (StringUtils.isBlank(serviceName)) {
+            serviceName = System.getenv(OTEL_SERVICE_NAME);
+        }
+        return StringUtils.isBlank(serviceName) ? "veadk_tracing" : serviceName;
+    }
+
+    public static String getOpenTelemetryResourceAttributes() {
+        return System.getenv(OTEL_RESOURCE_ATTRIBUTES);
     }
 
     public static String getVikingMmemoryType() {

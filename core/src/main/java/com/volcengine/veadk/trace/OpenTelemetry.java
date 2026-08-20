@@ -19,16 +19,20 @@ import com.google.adk.Telemetry;
 import com.volcengine.veadk.Version;
 import com.volcengine.veadk.trace.exporter.AttributeRewritingSpanExporter;
 import com.volcengine.veadk.trace.exporter.ExporterFactory;
+import com.volcengine.veadk.utils.EnvUtil;
 import io.opentelemetry.api.GlobalOpenTelemetry;
 import io.opentelemetry.api.common.AttributeKey;
 import io.opentelemetry.api.common.Attributes;
+import io.opentelemetry.api.common.AttributesBuilder;
 import io.opentelemetry.sdk.OpenTelemetrySdk;
 import io.opentelemetry.sdk.resources.Resource;
 import io.opentelemetry.sdk.trace.SdkTracerProvider;
 import io.opentelemetry.sdk.trace.export.BatchSpanProcessor;
 import io.opentelemetry.sdk.trace.export.SpanExporter;
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.TimeUnit;
+import org.apache.commons.lang3.StringUtils;
 
 public class OpenTelemetry {
 
@@ -48,24 +52,26 @@ public class OpenTelemetry {
                 BatchSpanProcessor.builder(rewritingExporter) // 重写一次
                         .setMaxQueueSize(2048)
                         .setMaxExportBatchSize(512)
-                        .setScheduleDelay(100, TimeUnit.MILLISECONDS)
+                        // Keep the HTTP root and its Agent/LLM/tool children in one export batch.
+                        // A very short delay lets the platform trace merger finalize a partial
+                        // trace before the long-running HTTP root span has ended.
+                        .setScheduleDelay(30, TimeUnit.SECONDS)
                         .setExporterTimeout(30, TimeUnit.SECONDS)
                         .build();
+
+        AttributesBuilder resourceAttributes =
+                Attributes.builder()
+                        .put("service.name", EnvUtil.getOpenTelemetryServiceName())
+                        .put("service.version", Version.JAVA_VEADK_VERSION);
+        addEnvironmentResourceAttributes(
+                resourceAttributes, EnvUtil.getOpenTelemetryResourceAttributes());
 
         SdkTracerProvider tracerProvider =
                 SdkTracerProvider.builder()
                         .addSpanProcessor(batchProcessor)
                         .setResource(
                                 Resource.getDefault()
-                                        .merge(
-                                                Resource.create(
-                                                        Attributes.of(
-                                                                AttributeKey.stringKey(
-                                                                        "service.name"),
-                                                                "veadk_tracing",
-                                                                AttributeKey.stringKey(
-                                                                        "service.version"),
-                                                                Version.JAVA_VEADK_VERSION))))
+                                        .merge(Resource.create(resourceAttributes.build())))
                         .build();
 
         OpenTelemetrySdk.builder().setTracerProvider(tracerProvider).buildAndRegisterGlobal();
@@ -73,5 +79,23 @@ public class OpenTelemetry {
         Telemetry.setTracerForTesting(GlobalOpenTelemetry.getTracer("veadk"));
 
         Runtime.getRuntime().addShutdownHook(new Thread(tracerProvider::close));
+    }
+
+    private static void addEnvironmentResourceAttributes(
+            AttributesBuilder builder, String configuredAttributes) {
+        if (StringUtils.isBlank(configuredAttributes)) {
+            return;
+        }
+        for (String entry : configuredAttributes.split(",")) {
+            int separator = entry.indexOf('=');
+            if (separator <= 0 || separator == entry.length() - 1) {
+                continue;
+            }
+            String key = entry.substring(0, separator).trim();
+            String value = entry.substring(separator + 1).trim();
+            if (StringUtils.isNotBlank(key) && StringUtils.isNotBlank(value)) {
+                builder.put(AttributeKey.stringKey(key.toLowerCase(Locale.ROOT)), value);
+            }
+        }
     }
 }
