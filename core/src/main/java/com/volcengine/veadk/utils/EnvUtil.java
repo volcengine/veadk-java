@@ -27,8 +27,10 @@ public class EnvUtil {
     private static final String TLS_REGION = "OBSERVABILITY_OPENTELEMETRY_TLS_REGION";
     private static final String VIKINGMEM_MEMORY_TYPE = "DATABASE_VIKINGMEM_MEMORY_TYPE";
     private static final String MODEL_AGENT_API_KEY = "MODEL_AGENT_API_KEY";
+    private static final String MODEL_AGENT_API_BASE = "MODEL_AGENT_API_BASE";
     private static final String TOOL_CODE_SANDBOX_URL = "TOOL_CODE_SANDBOX_URL";
     private static final String AGENTKIT_TOOL_ID = "AGENTKIT_TOOL_ID";
+    private static final String AGENTKIT_TOOL_SCHEME = "AGENTKIT_TOOL_SCHEME";
     private static final String AGENTKIT_TOOL_SERVICE = "AGENTKIT_TOOL_SERVICE_CODE";
     private static final String AGENTKIT_TOOL_REGION = "AGENTKIT_TOOL_REGION";
     private static final String AGENTKIT_TOOL_HOST = "AGENTKIT_TOOL_HOST";
@@ -39,6 +41,7 @@ public class EnvUtil {
     private static final String DEFAULT_VIKING_MEMORY_TYPE = "sys_event_v1";
     private static final String DEFAULT_AGENTKIT_SERVICE = "agentkit";
     private static final String DEFAULT_AGENTKIT_REGION = "cn-beijing";
+    private static final String DEFAULT_AGENTKIT_SCHEME = "https";
 
     private EnvUtil() {}
 
@@ -68,12 +71,28 @@ public class EnvUtil {
         return host;
     }
 
+    public static String getAgentKitScheme() {
+        String scheme = System.getenv(AGENTKIT_TOOL_SCHEME);
+        if (StringUtils.isNotBlank(scheme)) {
+            return scheme;
+        }
+        String host = System.getenv(AGENTKIT_TOOL_HOST);
+        return StringUtils.isNotBlank(host)
+                        && (host.endsWith(":8711") || host.endsWith(".vestack.cloud"))
+                ? "http"
+                : DEFAULT_AGENTKIT_SCHEME;
+    }
+
     public static String getAgentApiKey() {
         String apiKey = System.getenv(MODEL_AGENT_API_KEY);
         if (StringUtils.isBlank(apiKey)) {
             throw getIllegalStateException(MODEL_AGENT_API_KEY);
         }
         return apiKey;
+    }
+
+    public static String getAgentApiBase() {
+        return System.getenv(MODEL_AGENT_API_BASE);
     }
 
     public static String getAccessKey() {

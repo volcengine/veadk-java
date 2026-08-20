@@ -30,11 +30,20 @@ import java.util.Map;
 
 public class ArkAgent {
 
+    private static final String appName = "ark_agent";
+    private static final String defaultModelId = "doubao-seed-1-8-251228";
+    private static final String modelId = resolveModelId();
+
     public static BaseAgent ROOT_AGENT = initAgent();
+
     //     public static BaseAgent ROOT_AGENT = initAgentWithVeTools();
 
-    private static final String appName = "ark_agent";
-    private static final String modelId = "doubao-seed-1-8-251228";
+    private static String resolveModelId() {
+        String configuredModel = System.getenv("MODEL_AGENT_NAME");
+        return configuredModel == null || configuredModel.isBlank()
+                ? defaultModelId
+                : configuredModel;
+    }
 
     private static BaseAgent initAgent() {
         return LlmAgent.builder()
@@ -45,11 +54,15 @@ public class ArkAgent {
                         Answer user questions to the best of your knowledge.
                         1. use the 'getCurrentTime' tool to query the city’s current time.
                         2. use the 'getWeather' tool to query the city’s current weather.
+                        3. use the 'run_code' tool for calculations and programming tasks when the
+                           user asks to execute code. Do not claim execution succeeded unless the
+                           tool returns a successful result.
                         """)
                 .model(new ArkLlm(modelId))
                 .tools(
                         FunctionTool.create(ArkAgent.class, "getCurrentTime"),
-                        FunctionTool.create(ArkAgent.class, "getWeather"))
+                        FunctionTool.create(ArkAgent.class, "getWeather"),
+                        new RunCodeTool())
                 .build();
     }
 

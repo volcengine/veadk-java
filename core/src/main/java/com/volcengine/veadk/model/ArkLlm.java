@@ -70,6 +70,7 @@ public final class ArkLlm extends BaseLlm {
                     .build();
 
     private final ArkService arkService;
+    private final OpenAiCompatibleChatService compatibleChatService;
     private ChatCompletionRequest.ChatCompletionRequestThinking thinking = null;
 
     public ArkLlm(String modelName) {
@@ -79,7 +80,15 @@ public final class ArkLlm extends BaseLlm {
     public ArkLlm(String modelName, String thinking) {
         super(modelName);
         Objects.requireNonNull(modelName, "modelName must be set.");
-        this.arkService = ArkService.builder().apiKey(EnvUtil.getAgentApiKey()).build();
+        String apiBase = EnvUtil.getAgentApiBase();
+        if (StringUtils.isNotBlank(apiBase)) {
+            this.arkService = null;
+            this.compatibleChatService =
+                    new OpenAiCompatibleChatService(apiBase, EnvUtil.getAgentApiKey());
+        } else {
+            this.arkService = ArkService.builder().apiKey(EnvUtil.getAgentApiKey()).build();
+            this.compatibleChatService = null;
+        }
         if (StringUtils.isNotBlank(thinking)) {
             this.thinking = new ChatCompletionRequest.ChatCompletionRequestThinking(thinking);
         }
@@ -103,9 +112,16 @@ public final class ArkLlm extends BaseLlm {
         } else {
             log.debug("Sending generateContent request to model {}", arkRequest.getModel());
             // Handle non-streaming response
-            return Flowable.fromCallable(() -> arkService.createChatCompletion(arkRequest))
+            return Flowable.fromCallable(() -> createChatCompletion(arkRequest))
                     .map(this::toLlmResponse);
         }
+    }
+
+    private ChatCompletionResult createChatCompletion(ChatCompletionRequest arkRequest) {
+        if (compatibleChatService != null) {
+            return compatibleChatService.createChatCompletion(arkRequest);
+        }
+        return arkService.createChatCompletion(arkRequest);
     }
 
     /**
@@ -116,7 +132,9 @@ public final class ArkLlm extends BaseLlm {
     private Flowable<LlmResponse> generateContentStreaming(ChatCompletionRequest arkRequest) {
         // Get streaming response from Ark service
         io.reactivex.Flowable<ChatCompletionChunk> streamResponse =
-                arkService.streamChatCompletion(arkRequest);
+                compatibleChatService != null
+                        ? compatibleChatService.streamChatCompletion(arkRequest)
+                        : arkService.streamChatCompletion(arkRequest);
 
         return Flowable.defer(
                 () -> {
