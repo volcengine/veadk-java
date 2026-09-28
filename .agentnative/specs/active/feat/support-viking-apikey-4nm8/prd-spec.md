@@ -6,13 +6,15 @@
 - 变更面判断依据: 原始需求与已确认的需求澄清文档；veadk-java 当前 Viking backend、memory service、wrapper、环境变量和 README；veadk-python 固定提交 `31d2c67be6fb9bd7f3139de42d2615c2c4a73e6f` 的实现、测试与用户文档。
 - 差异判断: 产品形态仅涉及 Java SDK；站点仅新增 Volcengine 支持，BytePlus 保持现状；显式参数与环境变量两种配置形态遵循同一优先级；新旧 SDK 版本存在新增配置能力差异，但既有 AK/SK 调用保持兼容。依据: 需求澄清结论、仓库当前公共构造/配置入口与 Python 参考实现。
 - 本次变更关键信息:
+  - 本轮返修统一凭证缺失语义：对应 API Key 本地未配置有效值时，一对有效 AK/SK 继续承接数据面请求；仅在 API Key 本地未配置有效值且不存在一对有效 AK/SK 时报告凭证缺失。
   - Knowledgebase 的 API Key 范围固定为搜索已有 collection；文档添加、collection 管理等操作不扩展 API Key 权限。
   - Memory 的 API Key 范围固定为已有 Java 公共能力中的记忆添加与检索；API key-only 初始化不得执行 collection 管理预检查。
   - `DATABASE_VIKING_API_KEY` 与 `DATABASE_VIKINGMEM_API_KEY` 分别独立生效；有效显式参数优先于环境变量，未配置 API Key 时回到既有 AK/SK 链路。
   - API Key、AK/SK 与 Authorization 信息不得进入日志、异常、测试输出或文档示例。
 - Review 重点:
   - 核对 API Key 数据面范围是否严格等同于固定 Python 基线，尤其是 Knowledgebase `addDoc` 不纳入、Memory collection 管理不纳入。
-  - 核对配置解析、双凭证共存、无效显式值、API key-only 初始化和鉴权失败语义。
+  - 核对 REQ-005.1 已与 REQ-004 及鉴权选择矩阵一致：API Key 本地未配置有效值时先按 AK/SK 兼容路径处理，只有同时不存在一对有效 AK/SK 才报告凭证缺失。
+  - 核对配置解析、双凭证共存、无效显式值、API key-only 初始化和服务端鉴权失败不降级语义。
   - 核对公共 SDK 向后兼容、Volcengine/BytePlus 边界和敏感信息保护。
 
 ## Scope Note
@@ -169,6 +171,24 @@ Acceptance Requirements (EARS):
 - REQ-004.3: When 既无有效 API Key 也无一对有效 AK/SK, the Java SDK shall 在发出目标请求前或最接近鉴权边界处给出明确的凭证缺失错误。
 - REQ-004.4: The Java SDK shall 保持现有无需新参数的公共构造方式和调用代码可用，不要求 AK/SK 用户迁移到 API Key。
 
+Gherkin:
+
+```gherkin
+Scenario: API Key 未配置时回退有效 AK/SK
+  Given 对应能力未配置有效 API Key
+  And 用户已配置一对有效 AK/SK
+  When 用户调用对应 Viking 数据面能力
+  Then SDK 使用 AK/SK 并保持现有行为
+  And 不报告凭证缺失
+
+Scenario: API Key 本地未配置有效值且无有效 AK/SK 时报告凭证缺失
+  Given 对应能力未配置有效 API Key
+  And 用户未配置一对有效 AK/SK
+  When 用户调用对应 Viking 数据面能力
+  Then SDK 报告对应能力的凭证缺失
+  And 错误不包含任何凭证值
+```
+
 ### REQ-005: 可诊断且不泄密的失败行为
 
 - User Story: As a Java SDK 用户, I want 区分配置缺失、鉴权/权限失败、资源问题和空查询结果, so that 我可以安全定位问题。
@@ -177,8 +197,8 @@ Acceptance Requirements (EARS):
 
 Acceptance Requirements (EARS):
 
-- REQ-005.1: If API Key 缺失, then the Java SDK shall 给出能识别 Knowledgebase 或 Memory 所需配置来源的错误，且不包含任何凭证值。
-- REQ-005.2: If API Key 无效、过期或权限不足, then the Java SDK shall 向调用方暴露可识别的鉴权或权限失败，不得返回与“无结果”相同的成功响应。
+- REQ-005.1: When 对应能力既无有效 API Key（包括缺失或本地判定为未配置）也无一对有效 AK/SK, the Java SDK shall 给出能识别 Knowledgebase 或 Memory 所需配置来源的凭证缺失错误，且不包含任何凭证值；存在一对有效 AK/SK 时不得因 API Key 缺失或本地判定无效而报告凭证缺失。
+- REQ-005.2: If 已选择的非空 API Key 被服务端判定为无效、过期或权限不足, then the Java SDK shall 向调用方暴露可识别的鉴权或权限失败，不得返回与“无结果”相同的成功响应，也不得静默改用 AK/SK。
 - REQ-005.3: If 目标已有 collection 不存在或不可访问, then the Java SDK shall 暴露资源或权限失败，不得在 API key-only 模式下尝试自动创建 collection。
 - REQ-005.4: If 网络、超时、服务端或响应解析异常发生, then the Java SDK shall 按现有公共异常边界向调用方传播可诊断失败。
 - REQ-005.5: The Java SDK shall 不在任何日志级别、异常消息、测试失败输出或示例中输出 API Key、AK/SK、Token、Cookie 或完整 Authorization header。
@@ -203,8 +223,8 @@ Acceptance Requirements (EARS):
 | --- | --- | --- | --- |
 | 有效 API Key，无 AK/SK | API Key | API Key | 初始化跳过管理预检查；显式调用管理操作时报告需要 AK/SK |
 | 有效 API Key，有 AK/SK | API Key | API Key | AK/SK |
-| 无有效 API Key，有 AK/SK | AK/SK，保持现状 | AK/SK，保持现状 | AK/SK，保持现状 |
-| 无有效 API Key，无 AK/SK | 明确凭证缺失失败 | 明确凭证缺失失败 | 明确凭证缺失失败 |
+| 本地未配置有效 API Key，有一对有效 AK/SK | AK/SK，保持现状 | AK/SK，保持现状 | AK/SK，保持现状 |
+| 本地未配置有效 API Key，无一对有效 AK/SK | 明确凭证缺失失败 | 明确凭证缺失失败 | 明确凭证缺失失败 |
 
 ### 5.2 业务边界
 
@@ -280,8 +300,8 @@ Acceptance Requirements (EARS):
 - 配置解析: 显式值、环境变量、显式优先、空白/`none`/`null` 回退、两类 Key 隔离。
 - Knowledgebase: API Key 搜索、空结果、过滤/资源定位保持、`addDoc` 不使用 API Key、API key-only 跳过管理预检查。
 - Memory: API Key 添加、API Key 检索、无有效消息保持现状、API key-only 跳过管理预检查。
-- 兼容性: 仅 AK/SK、API Key 与 AK/SK 共存、无凭证、既有公共构造方式。
-- 失败与安全: 无效/过期/无权限 Key、资源不存在、网络/服务端/解析异常、日志和异常不包含假 Secret。
+- 兼容性: 仅 AK/SK；API Key 缺失或本地判定无效但 AK/SK 有效时回退 AK/SK；API Key 与 AK/SK 共存；既有公共构造方式。
+- 失败与安全: API Key 本地未配置有效值且不存在一对有效 AK/SK 时报告凭证缺失；已选择的 API Key 被服务端判定无效、过期或无权限时暴露失败且不降级；资源不存在、网络/服务端/解析异常；日志和异常不包含假 Secret。
 - 文档: 中英文说明一致，配置名与支持范围一致。
 
 ## 9. Traceability
@@ -291,6 +311,6 @@ Acceptance Requirements (EARS):
 | REQ-001 | EVD-001、EVD-003、EVD-004 | Knowledgebase 数据面与资源定位 | 搜索、空结果、addDoc 边界 |
 | REQ-002 | EVD-001、EVD-003、EVD-004 | Memory API Key client 与初始化边界 | 添加、检索、空消息、管理预检查 |
 | REQ-003 | EVD-001、EVD-004 | 配置解析与凭证隔离 | 优先级、空值、双 Key、失败不降级 |
-| REQ-004 | EVD-001、EVD-002 | 公共 API 与 AK/SK 兼容 | AK/SK-only、双凭证、无凭证 |
-| REQ-005 | EVD-001、EVD-006 | 错误映射与 Secret 防泄露 | 鉴权、权限、资源、依赖失败与泄密反例 |
+| REQ-004 | EVD-001、EVD-002 | 公共 API 与 AK/SK 兼容 | AK/SK-only、API Key 本地未配置有效值时回退、双凭证共存、两类凭证均未配置有效值 |
+| REQ-005 | EVD-001、EVD-006 | 凭证缺失条件、错误映射与 Secret 防泄露 | 两类凭证均未配置有效值、服务端鉴权不降级、权限、资源、依赖失败与泄密反例 |
 | REQ-006 | EVD-001、EVD-005 | 用户文档与示例 | 中英文一致性与占位凭证 |
