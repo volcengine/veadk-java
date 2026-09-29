@@ -53,7 +53,7 @@ public class Runner extends com.google.adk.runner.Runner {
                 appName,
                 new InMemoryArtifactService(),
                 new InMemorySessionService(),
-                resolvedMemoryService(agent, baseMemoryService),
+                resolveMemoryService(agent, baseMemoryService),
                 ImmutableList.of());
     }
 
@@ -104,7 +104,7 @@ public class Runner extends com.google.adk.runner.Runner {
                 Part.fromText(Objects.requireNonNull(message, "message must be set.")));
     }
 
-    private static BaseMemoryService resolvedMemoryService(
+    private static BaseMemoryService resolveMemoryService(
             BaseAgent agent, BaseMemoryService baseMemoryService) {
         if (baseMemoryService != null) {
             return baseMemoryService;

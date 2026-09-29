@@ -26,11 +26,18 @@ import com.google.adk.models.BaseLlmConnection;
 import com.google.adk.models.LlmRequest;
 import com.google.adk.models.LlmResponse;
 import com.google.adk.tools.BaseTool;
+import com.google.adk.tools.LoadMemoryTool;
 import com.google.adk.tools.ToolContext;
+import com.volcengine.veadk.agent.SaveSessionToMemoryCallback;
 import com.volcengine.veadk.knowledgebase.BaseKnowledgebaseService;
+import com.volcengine.veadk.knowledgebase.KnowledgebaseEntry;
+import com.volcengine.veadk.knowledgebase.SearchKnowledgebaseResponse;
 import com.volcengine.veadk.model.ArkLlm;
+import com.volcengine.veadk.runner.Runner;
+import com.volcengine.veadk.tools.knowledgebase.LoadKnowledgebaseTool;
 import io.reactivex.rxjava3.core.Flowable;
 import io.reactivex.rxjava3.core.Single;
+import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.junitpioneer.jupiter.ClearEnvironmentVariable;
@@ -83,7 +90,7 @@ class AgentTest {
         assertThat(snapshot.instructionSummary()).isEqualTo("Use the configured tools.");
         assertThat(snapshot.modelName()).isEqualTo("test-model");
         assertThat(snapshot.explicitToolNames()).containsExactly("lookup");
-        assertThat(snapshot.autoToolNames()).isEmpty();
+        assertThat(snapshot.autoToolNames()).containsExactly("loadKnowledgebase", "loadMemory");
         assertThat(snapshot.hasKnowledgebase()).isTrue();
         assertThat(snapshot.hasLongTermMemory()).isTrue();
         assertThat(snapshot.autoSaveSession()).isTrue();
@@ -156,6 +163,95 @@ class AgentTest {
     }
 
     @Test
+    void knowledgebaseAutoToolUsesPerAgentServiceAndIsCanonical() {
+        Agent firstAgent =
+                Agent.builder()
+                        .name("first_agent")
+                        .model(new TestLlm("first-model"))
+                        .knowledgebase(knowledgebaseServiceReturning("first"))
+                        .build();
+        Agent secondAgent =
+                Agent.builder()
+                        .name("second_agent")
+                        .model(new TestLlm("second-model"))
+                        .knowledgebase(knowledgebaseServiceReturning("second"))
+                        .build();
+
+        BaseTool firstTool = findTool(firstAgent, "loadKnowledgebase");
+        BaseTool secondTool = findTool(secondAgent, "loadKnowledgebase");
+        ToolContext ctx = mock(ToolContext.class);
+
+        assertThat(firstTool).isInstanceOf(LoadKnowledgebaseTool.class);
+        assertThat(secondTool).isInstanceOf(LoadKnowledgebaseTool.class);
+        assertThat(firstTool.customMetadata())
+                .containsEntry(Agent.AUTO_TOOL_METADATA_KEY, true)
+                .containsEntry(Agent.AUTO_TOOL_SOURCE_METADATA_KEY, "knowledgebase");
+        assertThat(firstKnowledgeContent(firstTool, "same", ctx)).isEqualTo("first");
+        assertThat(firstKnowledgeContent(secondTool, "same", ctx)).isEqualTo("second");
+        assertThat(firstAgent.metadataSnapshot().explicitToolNames()).isEmpty();
+        assertThat(firstAgent.metadataSnapshot().autoToolNames())
+                .containsExactly("loadKnowledgebase");
+    }
+
+    @Test
+    void longTermMemoryAutoInjectsOfficialLoadMemoryTool() {
+        BaseMemoryService memoryService = mock(BaseMemoryService.class);
+
+        Agent agent =
+                Agent.builder()
+                        .name("memory_agent")
+                        .model(new TestLlm("memory-model"))
+                        .longTermMemory(memoryService)
+                        .build();
+        BaseTool tool = findTool(agent, "loadMemory");
+
+        assertThat(tool).isInstanceOf(LoadMemoryTool.class);
+        assertThat(tool.customMetadata())
+                .containsEntry(Agent.AUTO_TOOL_METADATA_KEY, true)
+                .containsEntry(Agent.AUTO_TOOL_SOURCE_METADATA_KEY, "memory");
+        assertThat(agent.metadataSnapshot().autoToolNames()).containsExactly("loadMemory");
+    }
+
+    @Test
+    void autoSaveSessionAddsCallbackOnce() {
+        BaseMemoryService memoryService = mock(BaseMemoryService.class);
+
+        Agent agent =
+                Agent.builder()
+                        .name("autosave_agent")
+                        .model(new TestLlm("autosave-model"))
+                        .longTermMemory(memoryService)
+                        .autoSaveSession(true)
+                        .build();
+
+        assertThat(agent.afterAgentCallback())
+                .filteredOn(SaveSessionToMemoryCallback.class::isInstance)
+                .hasSize(1);
+        assertThat(new Runner(agent).memoryService()).isSameAs(memoryService);
+    }
+
+    @Test
+    void autoSaveSessionDoesNotDuplicateExplicitSaveCallback() {
+        BaseMemoryService memoryService = mock(BaseMemoryService.class);
+        SaveSessionToMemoryCallback saveCallback = new SaveSessionToMemoryCallback();
+
+        Agent agent =
+                Agent.builder()
+                        .name("explicit_autosave_agent")
+                        .model(new TestLlm("explicit-autosave-model"))
+                        .longTermMemory(memoryService)
+                        .afterAgentCallback(saveCallback)
+                        .autoSaveSession(true)
+                        .build();
+
+        assertThat(agent.afterAgentCallback())
+                .filteredOn(SaveSessionToMemoryCallback.class::isInstance)
+                .hasSize(1);
+        assertThat(agent.afterAgentCallback()).hasSize(1);
+        assertThat(agent.afterAgentCallback().get(0)).isSameAs(saveCallback);
+    }
+
+    @Test
     void unsupportedPythonOnlyOptionsFailFast() {
         assertThatThrownBy(() -> Agent.builder().name("unsupported_agent").runtime("codex"))
                 .isInstanceOf(UnsupportedOperationException.class)
@@ -188,5 +284,24 @@ class AgentTest {
                 Map<String, Object> args, ToolContext toolContext) {
             return Single.just(Map.of());
         }
+    }
+
+    private static BaseTool findTool(Agent agent, String name) {
+        return agent.canonicalTools().filter(tool -> tool.name().equals(name)).blockingFirst();
+    }
+
+    private static String firstKnowledgeContent(BaseTool tool, String query, ToolContext ctx) {
+        Map<String, Object> result = tool.runAsync(Map.of("query", query), ctx).blockingGet();
+        List<?> knowledges = (List<?>) result.get("knowledges");
+        return (String) ((Map<?, ?>) knowledges.get(0)).get("content");
+    }
+
+    private static BaseKnowledgebaseService knowledgebaseServiceReturning(String content) {
+        return query -> {
+            SearchKnowledgebaseResponse response = new SearchKnowledgebaseResponse();
+            response.setKnowledgebaseEntries(
+                    List.of(new KnowledgebaseEntry(content, Map.of("query", query))));
+            return Single.just(response);
+        };
     }
 }
