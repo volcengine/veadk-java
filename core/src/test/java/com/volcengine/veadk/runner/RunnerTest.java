@@ -21,6 +21,7 @@ import static org.mockito.Mockito.mock;
 
 import com.google.adk.agents.BaseAgent;
 import com.google.adk.agents.InvocationContext;
+import com.google.adk.agents.RunConfig;
 import com.google.adk.events.Event;
 import com.google.adk.memory.BaseMemoryService;
 import com.google.adk.models.BaseLlm;
@@ -96,7 +97,12 @@ class RunnerTest {
         EventAgent agent = new EventAgent("runner_agent", textEvent("runner_agent", "explicit"));
         Runner runner = new Runner(agent);
 
-        String answer = runner.run("user-1", "session-1", "hello");
+        String answer =
+                runner.run(
+                        "user-1",
+                        "session-1",
+                        "hello",
+                        RunConfig.builder().autoCreateSession(true).build());
 
         assertThat(answer).isEqualTo("explicit");
         assertThat(agent.lastContext().userId()).isEqualTo("user-1");
@@ -108,6 +114,39 @@ class RunnerTest {
                                 .blockingGet()
                                 .id())
                 .isEqualTo("session-1");
+    }
+
+    @Test
+    void runWithExplicitMissingSessionHonorsAutoCreateSessionFalse() {
+        EventAgent agent = new EventAgent("runner_agent", textEvent("runner_agent", "unused"));
+        Runner runner = new Runner(agent);
+
+        assertThatThrownBy(() -> runner.run("user-1", "missing-session", "hello"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Session not found: missing-session for user user-1");
+    }
+
+    @Test
+    void runWithExplicitSessionIdReusesExistingSession() {
+        EventAgent agent = new EventAgent("runner_agent", textEvent("runner_agent", "ok"));
+        Runner runner = new Runner(agent);
+        RunConfig autoCreateSession = RunConfig.builder().autoCreateSession(true).build();
+
+        runner.run("user-1", "session-1", "first", autoCreateSession);
+        runner.run("user-1", "session-1", "second", autoCreateSession);
+
+        assertThat(
+                        runner.sessionService()
+                                .listSessions(runner.appName(), "user-1")
+                                .blockingGet()
+                                .sessions())
+                .hasSize(1);
+        assertThat(
+                        runner.sessionService()
+                                .listEvents(runner.appName(), "user-1", "session-1")
+                                .blockingGet()
+                                .events())
+                .hasSize(4);
     }
 
     @Test

@@ -19,6 +19,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 
+import com.google.adk.agents.Callbacks;
 import com.google.adk.agents.LlmAgent;
 import com.google.adk.memory.BaseMemoryService;
 import com.google.adk.models.BaseLlm;
@@ -36,6 +37,7 @@ import com.volcengine.veadk.model.ArkLlm;
 import com.volcengine.veadk.runner.Runner;
 import com.volcengine.veadk.tools.knowledgebase.LoadKnowledgebaseTool;
 import io.reactivex.rxjava3.core.Flowable;
+import io.reactivex.rxjava3.core.Maybe;
 import io.reactivex.rxjava3.core.Single;
 import java.util.List;
 import java.util.Map;
@@ -126,6 +128,24 @@ class AgentTest {
         assertThat(agent.model().orElseThrow().model().orElseThrow()).isInstanceOf(ArkLlm.class);
         ArkLlm arkLlm = (ArkLlm) agent.model().orElseThrow().model().orElseThrow();
         assertThat(arkLlm.config().getApiKey()).isEqualTo("explicit-api-key");
+    }
+
+    @Test
+    @ClearEnvironmentVariable(key = "MODEL_AGENT_API_KEY")
+    void modelNameAfterExplicitModelReconfiguresArkLlm() {
+        Agent agent =
+                Agent.builder()
+                        .name("model_order_agent")
+                        .model(new TestLlm("first-model"))
+                        .modelApiKey("explicit-api-key")
+                        .modelName("second-model")
+                        .build();
+
+        assertThat(agent.veadkModelName()).isEqualTo("second-model");
+        assertThat(agent.model()).isPresent();
+        assertThat(agent.model().orElseThrow().model().orElseThrow()).isInstanceOf(ArkLlm.class);
+        assertThat(agent.model().orElseThrow().model().orElseThrow().model())
+                .isEqualTo("second-model");
     }
 
     @Test
@@ -249,6 +269,27 @@ class AgentTest {
                 .hasSize(1);
         assertThat(agent.afterAgentCallback()).hasSize(1);
         assertThat(agent.afterAgentCallback().get(0)).isSameAs(saveCallback);
+    }
+
+    @Test
+    void autoSaveSessionPreservesListAfterAgentCallbacks() {
+        BaseMemoryService memoryService = mock(BaseMemoryService.class);
+        Callbacks.AfterAgentCallback explicitCallback = callbackContext -> Maybe.empty();
+
+        Agent agent =
+                Agent.builder()
+                        .name("list_callback_agent")
+                        .model(new TestLlm("list-callback-model"))
+                        .longTermMemory(memoryService)
+                        .afterAgentCallback(List.of(explicitCallback))
+                        .autoSaveSession(true)
+                        .build();
+
+        assertThat(agent.afterAgentCallback()).hasSize(2);
+        assertThat(agent.afterAgentCallback().get(0)).isSameAs(explicitCallback);
+        assertThat(agent.afterAgentCallback())
+                .filteredOn(SaveSessionToMemoryCallback.class::isInstance)
+                .hasSize(1);
     }
 
     @Test

@@ -27,7 +27,9 @@ import com.google.common.collect.ImmutableList;
 import com.google.genai.types.Content;
 import com.google.genai.types.Part;
 import com.volcengine.veadk.Agent;
+import io.reactivex.rxjava3.core.Single;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.stream.Collectors;
 
@@ -90,13 +92,33 @@ public class Runner extends com.google.adk.runner.Runner {
         Objects.requireNonNull(runConfig, "runConfig must be set.");
         String resolvedUserId = requireText(userId, "userId must be set.");
 
-        Session session =
-                sessionService()
-                        .createSession(appName(), resolvedUserId, java.util.Map.of(), sessionId)
-                        .blockingGet();
+        Session session = resolveSession(resolvedUserId, sessionId, runConfig);
         List<Event> events =
                 runAsync(session.userId(), session.id(), content, runConfig).toList().blockingGet();
         return extractResponseText(events, appName(), session.userId(), session.id());
+    }
+
+    private Session resolveSession(String userId, String sessionId, RunConfig runConfig) {
+        if (!hasText(sessionId)) {
+            return sessionService().createSession(appName(), userId, Map.of(), null).blockingGet();
+        }
+        return sessionService()
+                .getSession(appName(), userId, sessionId, java.util.Optional.empty())
+                .switchIfEmpty(
+                        Single.defer(
+                                () -> {
+                                    if (runConfig.autoCreateSession()) {
+                                        return sessionService()
+                                                .createSession(
+                                                        appName(), userId, Map.of(), sessionId);
+                                    }
+                                    return Single.error(
+                                            new IllegalArgumentException(
+                                                    String.format(
+                                                            "Session not found: %s for user %s",
+                                                            sessionId, userId)));
+                                }))
+                .blockingGet();
     }
 
     private static RunConfig defaultRunConfig() {

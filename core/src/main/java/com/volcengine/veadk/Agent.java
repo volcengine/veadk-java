@@ -207,6 +207,15 @@ public final class Agent extends LlmAgent {
         }
 
         @Override
+        @SuppressWarnings({"rawtypes", "unchecked"})
+        public Builder beforeAgentCallback(List beforeAgentCallback) {
+            // ADK's callback base marker type is package-private, so this override must keep
+            // the inherited erased signature instead of exposing that marker in VeADK's API.
+            super.beforeAgentCallback(beforeAgentCallback);
+            return this;
+        }
+
+        @Override
         public Builder beforeAgentCallbackSync(
                 Callbacks.BeforeAgentCallbackSync beforeAgentCallbackSync) {
             super.beforeAgentCallbackSync(beforeAgentCallbackSync);
@@ -219,6 +228,16 @@ public final class Agent extends LlmAgent {
                     Objects.requireNonNull(afterAgentCallback, "afterAgentCallback must be set.");
             super.afterAgentCallback(resolvedCallback);
             this.explicitAfterAgentCallbacks = List.of(resolvedCallback);
+            return this;
+        }
+
+        @Override
+        @SuppressWarnings({"rawtypes", "unchecked"})
+        public Builder afterAgentCallback(List afterAgentCallback) {
+            // ADK's callback base marker type is package-private, so this override must keep
+            // the inherited erased signature instead of exposing that marker in VeADK's API.
+            this.explicitAfterAgentCallbacks = normalizeAfterAgentCallbacks(afterAgentCallback);
+            super.afterAgentCallback(afterAgentCallback);
             return this;
         }
 
@@ -238,9 +257,8 @@ public final class Agent extends LlmAgent {
         @Override
         public Builder model(String model) {
             String resolvedModelName = requireText(model, "model must be set.");
-            if (!explicitModelConfigured) {
-                this.veadkModelName = resolvedModelName;
-            }
+            this.veadkModelName = resolvedModelName;
+            this.explicitModelConfigured = false;
             return this;
         }
 
@@ -516,6 +534,25 @@ public final class Agent extends LlmAgent {
         private static boolean containsSaveSessionCallback(
                 List<Callbacks.AfterAgentCallback> callbacks) {
             return callbacks.stream().anyMatch(SaveSessionToMemoryCallback.class::isInstance);
+        }
+
+        @SuppressWarnings("rawtypes")
+        private static List<Callbacks.AfterAgentCallback> normalizeAfterAgentCallbacks(
+                List callbacks) {
+            if (callbacks == null) {
+                return List.of();
+            }
+            List<Callbacks.AfterAgentCallback> normalizedCallbacks = new ArrayList<>();
+            for (Object callback : callbacks) {
+                if (callback instanceof Callbacks.AfterAgentCallback afterAgentCallback) {
+                    normalizedCallbacks.add(afterAgentCallback);
+                } else if (callback instanceof Callbacks.AfterAgentCallbackSync syncCallback) {
+                    normalizedCallbacks.add(
+                            callbackContext ->
+                                    Maybe.fromOptional(syncCallback.call(callbackContext)));
+                }
+            }
+            return List.copyOf(normalizedCallbacks);
         }
 
         private AgentMetadataSnapshot metadataSnapshot(String name, String description) {
