@@ -27,6 +27,8 @@ import com.google.adk.tools.BaseToolset;
 import com.google.genai.types.GenerateContentConfig;
 import com.google.genai.types.Schema;
 import com.volcengine.veadk.knowledgebase.BaseKnowledgebaseService;
+import com.volcengine.veadk.model.ArkLlm;
+import com.volcengine.veadk.model.ArkLlmConfig;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
@@ -90,6 +92,10 @@ public final class Agent extends LlmAgent {
         private String instructionSummary = "";
         private List<String> explicitToolNames = List.of();
         private List<String> autoToolNames = List.of();
+        private boolean explicitModelConfigured;
+        private String modelApiKey;
+        private String modelApiBase;
+        private String modelThinking;
 
         public Builder() {
             name(DEFAULT_NAME);
@@ -118,9 +124,22 @@ public final class Agent extends LlmAgent {
         }
 
         public Builder modelApiKey(String apiKey) {
-            throw new UnsupportedOperationException(
-                    "modelApiKey is reserved for the ArkLlm configuration task and is not wired in"
-                            + " Agent PR-0. Use model(BaseLlm) for explicit model instances.");
+            this.modelApiKey = apiKey;
+            return this;
+        }
+
+        public Builder modelApiBase(String apiBase) {
+            this.modelApiBase = apiBase;
+            return this;
+        }
+
+        public Builder modelBaseUrl(String baseUrl) {
+            return modelApiBase(baseUrl);
+        }
+
+        public Builder modelThinking(String thinking) {
+            this.modelThinking = thinking;
+            return this;
         }
 
         public Builder runtime(String runtime) {
@@ -200,8 +219,9 @@ public final class Agent extends LlmAgent {
         @Override
         public Builder model(String model) {
             String resolvedModelName = requireText(model, "model must be set.");
-            super.model(resolvedModelName);
-            this.veadkModelName = resolvedModelName;
+            if (!explicitModelConfigured) {
+                this.veadkModelName = resolvedModelName;
+            }
             return this;
         }
 
@@ -210,6 +230,7 @@ public final class Agent extends LlmAgent {
             BaseLlm resolvedModel = Objects.requireNonNull(model, "model must be set.");
             super.model(resolvedModel);
             this.veadkModelName = Objects.requireNonNullElse(resolvedModel.model(), "");
+            this.explicitModelConfigured = true;
             return this;
         }
 
@@ -405,8 +426,23 @@ public final class Agent extends LlmAgent {
 
         @Override
         public Agent build() {
+            configureModel();
             validate();
             return new Agent(this);
+        }
+
+        private void configureModel() {
+            if (explicitModelConfigured) {
+                return;
+            }
+            super.model(
+                    new ArkLlm(
+                            ArkLlmConfig.builder()
+                                    .modelName(veadkModelName)
+                                    .apiKey(modelApiKey)
+                                    .apiBase(modelApiBase)
+                                    .thinking(modelThinking)
+                                    .build()));
         }
 
         private AgentMetadataSnapshot metadataSnapshot(String name, String description) {

@@ -28,14 +28,18 @@ import com.google.adk.models.LlmResponse;
 import com.google.adk.tools.BaseTool;
 import com.google.adk.tools.ToolContext;
 import com.volcengine.veadk.knowledgebase.BaseKnowledgebaseService;
+import com.volcengine.veadk.model.ArkLlm;
 import io.reactivex.rxjava3.core.Flowable;
 import io.reactivex.rxjava3.core.Single;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
+import org.junitpioneer.jupiter.ClearEnvironmentVariable;
+import org.junitpioneer.jupiter.SetEnvironmentVariable;
 
 class AgentTest {
 
     @Test
+    @SetEnvironmentVariable(key = "MODEL_AGENT_API_KEY", value = "test-api-key")
     void buildWithoutOverridesUsesVeadkDefaults() {
         Agent agent = Agent.builder().build();
 
@@ -45,7 +49,8 @@ class AgentTest {
         assertThat(agent.metadataSnapshot().instructionSummary())
                 .isEqualTo(Agent.DEFAULT_INSTRUCTION);
         assertThat(agent.model()).isPresent();
-        assertThat(agent.model().orElseThrow().modelName()).contains(Agent.DEFAULT_MODEL_NAME);
+        assertThat(agent.model().orElseThrow().model().orElseThrow().model())
+                .isEqualTo(Agent.DEFAULT_MODEL_NAME);
     }
 
     @Test
@@ -85,7 +90,8 @@ class AgentTest {
     }
 
     @Test
-    void modelNameIsVeadkAliasForAdkModelString() {
+    @SetEnvironmentVariable(key = "MODEL_AGENT_API_KEY", value = "test-api-key")
+    void modelNameCreatesArkLlm() {
         Agent agent =
                 Agent.builder()
                         .name("model_name_agent")
@@ -94,7 +100,38 @@ class AgentTest {
 
         assertThat(agent.veadkModelName()).isEqualTo("doubao-seed-2-1-pro-260628");
         assertThat(agent.model()).isPresent();
-        assertThat(agent.model().orElseThrow().modelName()).contains("doubao-seed-2-1-pro-260628");
+        assertThat(agent.model().orElseThrow().model().orElseThrow()).isInstanceOf(ArkLlm.class);
+        assertThat(agent.model().orElseThrow().model().orElseThrow().model())
+                .isEqualTo("doubao-seed-2-1-pro-260628");
+    }
+
+    @Test
+    @ClearEnvironmentVariable(key = "MODEL_AGENT_API_KEY")
+    void modelApiKeyCreatesArkLlmWithoutEnv() {
+        Agent agent =
+                Agent.builder()
+                        .name("explicit_key_agent")
+                        .modelName("doubao-seed-2-1-pro-260628")
+                        .modelApiKey("explicit-api-key")
+                        .build();
+
+        assertThat(agent.model()).isPresent();
+        assertThat(agent.model().orElseThrow().model().orElseThrow()).isInstanceOf(ArkLlm.class);
+        ArkLlm arkLlm = (ArkLlm) agent.model().orElseThrow().model().orElseThrow();
+        assertThat(arkLlm.config().getApiKey()).isEqualTo("explicit-api-key");
+    }
+
+    @Test
+    @ClearEnvironmentVariable(key = "MODEL_AGENT_API_KEY")
+    void missingModelApiKeyFailsFastWhenAutoCreatingArkLlm() {
+        assertThatThrownBy(
+                        () ->
+                                Agent.builder()
+                                        .name("missing_key_agent")
+                                        .modelName("doubao-seed-2-1-pro-260628")
+                                        .build())
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("MODEL_AGENT_API_KEY");
     }
 
     @Test
@@ -123,9 +160,6 @@ class AgentTest {
         assertThatThrownBy(() -> Agent.builder().name("unsupported_agent").runtime("codex"))
                 .isInstanceOf(UnsupportedOperationException.class)
                 .hasMessageContaining("runtime is not supported");
-        assertThatThrownBy(() -> Agent.builder().name("unsupported_agent").modelApiKey("key"))
-                .isInstanceOf(UnsupportedOperationException.class)
-                .hasMessageContaining("modelApiKey is reserved");
     }
 
     private static final class TestLlm extends BaseLlm {
