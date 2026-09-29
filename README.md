@@ -89,9 +89,28 @@ Start command:
 - Import the Maven multi-module project using IntelliJ IDEA or Eclipse.
 - Directly run the `main` method of `AgentCliRunner` or `AdkWeb`.
 - Ensure the required environment variables are injected in your IDE run configuration (or start the IDE from a shell that has them set).
-- If you need `web search`, `Viking Memory`, or `Viking Knowledgebase`, configure these environment variables:
+- If you need `web search`, Viking resource management, or the existing AK/SK path for `Viking Memory` and `Viking Knowledgebase`, configure these environment variables:
   - `VOLCENGINE_ACCESS_KEY`: Volcengine AccessKey
   - `VOLCENGINE_SECRET_KEY`: Volcengine SecretKey
+- Viking data-plane operations also support dedicated API keys for collections that already exist:
+  - `DATABASE_VIKING_API_KEY`: search a Viking Knowledgebase collection
+  - `DATABASE_VIKINGMEM_API_KEY`: add and search Viking Memory
+  - `KnowledgeBase.Builder.apiKey(String)` and `VikingMemoryService(String, String)` provide per-instance explicit values. A non-blank explicit value takes precedence over the matching environment variable; blank, `none`, and `null` values fall back to the environment.
+  - With only an API key configured, initialization skips collection existence checks and automatic creation. Collection and document management (including Knowledgebase `addDoc`) still require both `VOLCENGINE_ACCESS_KEY` and `VOLCENGINE_SECRET_KEY`. API key requests do not fall back to AK/SK after an authentication or service failure.
+
+Example with placeholder API keys and pre-existing collections:
+
+```java
+KnowledgeBase knowledgeBase =
+        KnowledgeBase.builder()
+                .backend("viking")
+                .appName("existing_knowledge_collection")
+                .apiKey("YOUR_VIKING_KNOWLEDGEBASE_API_KEY")
+                .build();
+VikingMemoryService memoryService =
+        new VikingMemoryService(
+                "existing_memory_collection", "YOUR_VIKING_MEMORY_API_KEY");
+```
 - If you need `Mem0 Memory`, configure either a direct Mem0 API key:
   - `DATABASE_MEM0_API_KEY`: Mem0 API Key
   - `DATABASE_MEM0_BASE_URL`: Mem0 endpoint, for example `https://api.mem0.ai`

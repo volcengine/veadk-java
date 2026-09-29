@@ -2,6 +2,7 @@ package com.volcengine.veadk.integration.vikingknowledgebase;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.isNull;
@@ -9,10 +10,12 @@ import static org.mockito.Mockito.when;
 
 import com.volcengine.error.SdkError;
 import com.volcengine.model.response.RawResponse;
+import com.volcengine.veadk.integration.VikingApiKeyHttpClient;
 import com.volcengine.veadk.utils.JSONUtil;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
@@ -131,5 +134,74 @@ class VikingKnowledgebaseWrapperTest {
                 vikingKnowledgebaseWrapper.searchKnowledge(
                         "test-collection", "query", 1, new HashMap<>(), false, 0);
         assertTrue(result.isEmpty());
+    }
+
+    @Test
+    void searchKnowledge_withApiKeyUsesDataPlaneClient() throws Exception {
+        VikingApiKeyHttpClient apiKeyClient = Mockito.mock(VikingApiKeyHttpClient.class);
+        VikingKnowledgebaseWrapper wrapper =
+                new VikingKnowledgebaseWrapper(null, null, apiKeyClient);
+        when(apiKeyClient.post(
+                        Mockito.eq("search knowledgebase"),
+                        Mockito.eq(VikingApiKeyHttpClient.KNOWLEDGEBASE_SEARCH_PATH),
+                        Mockito.anyMap()))
+                .thenReturn(
+                        JSONUtil.parseJson(
+                                "{\"code\":0,\"data\":{\"result_list\":[{\"content\":\"answer\","
+                                    + "\"doc_info\":{\"doc_meta\":\"[{\\\"field_name\\\":\\\"k\\\","
+                                    + "\\\"field_value\\\":\\\"v\\\"}]\"}}]}}"));
+
+        List<KnowledgebaseEntry> entries =
+                wrapper.searchKnowledge("KbApp", "query", 3, Map.of("category", "doc"), true, 2);
+
+        assertEquals(1, entries.size());
+        assertEquals("answer", entries.get(0).getContent());
+        assertEquals("v", entries.get(0).getMetadata().get("k"));
+        org.mockito.ArgumentCaptor<Map> bodyCaptor = org.mockito.ArgumentCaptor.forClass(Map.class);
+        Mockito.verify(apiKeyClient)
+                .post(
+                        Mockito.eq("search knowledgebase"),
+                        Mockito.eq(VikingApiKeyHttpClient.KNOWLEDGEBASE_SEARCH_PATH),
+                        bodyCaptor.capture());
+        assertEquals("KbApp", bodyCaptor.getValue().get("name"));
+        assertEquals(3, bodyCaptor.getValue().get("limit"));
+        assertTrue(bodyCaptor.getValue().containsKey("query_param"));
+        assertTrue(bodyCaptor.getValue().containsKey("post_processing"));
+    }
+
+    @Test
+    void searchKnowledge_withApiKeyReturnsNormalEmptyList() throws Exception {
+        VikingApiKeyHttpClient apiKeyClient = Mockito.mock(VikingApiKeyHttpClient.class);
+        VikingKnowledgebaseWrapper wrapper =
+                new VikingKnowledgebaseWrapper(null, null, apiKeyClient);
+        when(apiKeyClient.post(Mockito.anyString(), Mockito.anyString(), Mockito.anyMap()))
+                .thenReturn(JSONUtil.parseJson("{\"code\":0,\"data\":{\"result_list\":[]}}"));
+
+        assertTrue(wrapper.searchKnowledge("KbApp", "query", 1, null, false, 0).isEmpty());
+    }
+
+    @Test
+    void searchKnowledge_withApiKeyRejectsMissingResultList() throws Exception {
+        VikingApiKeyHttpClient apiKeyClient = Mockito.mock(VikingApiKeyHttpClient.class);
+        VikingKnowledgebaseWrapper wrapper =
+                new VikingKnowledgebaseWrapper(null, null, apiKeyClient);
+        when(apiKeyClient.post(Mockito.anyString(), Mockito.anyString(), Mockito.anyMap()))
+                .thenReturn(JSONUtil.parseJson("{\"code\":0,\"data\":{}}"));
+
+        assertThrows(
+                IllegalStateException.class,
+                () -> wrapper.searchKnowledge("KbApp", "query", 1, null, false, 0));
+    }
+
+    @Test
+    void apiKeyOnlyManagementOperationRequiresAkSk() {
+        VikingKnowledgebaseWrapper wrapper =
+                new VikingKnowledgebaseWrapper(
+                        " ", null, Mockito.mock(VikingApiKeyHttpClient.class));
+
+        assertThrows(IllegalStateException.class, () -> wrapper.isCollectionExists("KbApp"));
+        assertThrows(IllegalStateException.class, () -> wrapper.createCollection("KbApp"));
+        assertThrows(
+                IllegalStateException.class, () -> wrapper.addDoc("KbApp", "tos://bucket/doc.md"));
     }
 }

@@ -37,9 +37,11 @@ public class VikingKnowledgebaseBackend implements BaseKnowledgebaseBackend {
     public VikingKnowledgebaseBackend(String collectionName, VikingKnowledgebaseConfig config) {
         this(
                 validateCollectionName(collectionName),
-                new VikingKnowledgebaseWrapper(config.getAccessKey(), config.getSecretKey()),
+                new VikingKnowledgebaseWrapper(
+                        config.getAccessKey(), config.getSecretKey(), config.getApiKey()),
                 config.isRerank(),
-                config.getChunkDiffusionCount());
+                config.getChunkDiffusionCount(),
+                config.hasManagementCredentials());
     }
 
     VikingKnowledgebaseBackend(
@@ -47,12 +49,23 @@ public class VikingKnowledgebaseBackend implements BaseKnowledgebaseBackend {
             VikingKnowledgebaseWrapper wrapper,
             boolean rerank,
             int chunkDiffusionCount) {
+        this(collectionName, wrapper, rerank, chunkDiffusionCount, true);
+    }
+
+    VikingKnowledgebaseBackend(
+            String collectionName,
+            VikingKnowledgebaseWrapper wrapper,
+            boolean rerank,
+            int chunkDiffusionCount,
+            boolean hasManagementCredentials) {
         this.collectionName = collectionName;
         this.wrapper = wrapper;
         this.rerank = rerank;
         this.chunkDiffusionCount = chunkDiffusionCount;
         precheckIndexNaming();
-        ensureCollection();
+        if (hasManagementCredentials) {
+            ensureCollection();
+        }
     }
 
     @Override

@@ -23,6 +23,8 @@ import com.volcengine.model.Credentials;
 import com.volcengine.model.ServiceInfo;
 import com.volcengine.model.response.RawResponse;
 import com.volcengine.service.BaseServiceImpl;
+import com.volcengine.veadk.integration.VikingApiKeyHttpClient;
+import com.volcengine.veadk.utils.EnvUtil;
 import com.volcengine.veadk.utils.JSONUtil;
 import java.io.IOException;
 import java.util.ArrayList;
@@ -31,6 +33,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.http.Header;
 import org.apache.http.message.BasicHeader;
 import org.slf4j.Logger;
@@ -134,13 +137,36 @@ public class VikingKnowledgebaseWrapper extends BaseServiceImpl {
                 }
             };
 
+    private final boolean hasManagementCredentials;
+    private final VikingApiKeyHttpClient apiKeyClient;
+
     public VikingKnowledgebaseWrapper(String accessKey, String secretKey) {
+        this(accessKey, secretKey, (String) null);
+    }
+
+    public VikingKnowledgebaseWrapper(String accessKey, String secretKey, String apiKey) {
+        this(
+                accessKey,
+                secretKey,
+                EnvUtil.normalizeOptionalCredential(apiKey) == null
+                        ? null
+                        : new VikingApiKeyHttpClient(EnvUtil.normalizeOptionalCredential(apiKey)));
+    }
+
+    VikingKnowledgebaseWrapper(
+            String accessKey, String secretKey, VikingApiKeyHttpClient apiKeyClient) {
         super(SERVICE_INFO, API_INFO_LIST);
-        setAccessKey(accessKey);
-        setSecretKey(secretKey);
+        this.hasManagementCredentials =
+                StringUtils.isNotBlank(accessKey) && StringUtils.isNotBlank(secretKey);
+        this.apiKeyClient = apiKeyClient;
+        if (hasManagementCredentials) {
+            setAccessKey(accessKey);
+            setSecretKey(secretKey);
+        }
     }
 
     public boolean isCollectionExists(String collectionName) {
+        requireManagementCredentials("get collection");
         try {
             Map<String, String> body = new HashMap<>();
             body.put("name", collectionName);
@@ -171,6 +197,7 @@ public class VikingKnowledgebaseWrapper extends BaseServiceImpl {
     }
 
     public boolean createCollection(String collectionName) {
+        requireManagementCredentials("create collection");
         try {
             Map<String, Object> body = new HashMap<>();
             body.put("name", collectionName);
@@ -201,6 +228,7 @@ public class VikingKnowledgebaseWrapper extends BaseServiceImpl {
     }
 
     public boolean addDoc(String collectionName, String tosUrl) {
+        requireManagementCredentials("add document");
         try {
             Map<String, Object> body = new HashMap<>();
             body.put("collection_name", collectionName);
@@ -263,6 +291,21 @@ public class VikingKnowledgebaseWrapper extends BaseServiceImpl {
             body.put("post_processing", postProcessing);
 
             String bodyStr = JSONUtil.toJson(body);
+            if (apiKeyClient != null) {
+                JsonNode rootNode =
+                        apiKeyClient.post(
+                                "search knowledgebase",
+                                VikingApiKeyHttpClient.KNOWLEDGEBASE_SEARCH_PATH,
+                                body);
+                try {
+                    return parseKnowledgeEntries(rootNode, true);
+                } catch (IOException e) {
+                    throw VikingApiKeyHttpClient.invalidResponse(
+                            "search knowledgebase",
+                            VikingApiKeyHttpClient.KNOWLEDGEBASE_SEARCH_PATH,
+                            rootNode);
+                }
+            }
             RawResponse response = json("SearchKnowledge", null, bodyStr);
 
             if (response.getCode() != SdkError.SUCCESS.getNumber()) {
@@ -278,34 +321,52 @@ public class VikingKnowledgebaseWrapper extends BaseServiceImpl {
                     bodyStr,
                     JSONUtil.parseJson(response.getData()));
 
-            JsonNode rootNode = JSONUtil.parseJson(response.getData());
-            JsonNode resultList = rootNode.path("data").path("result_list");
-
-            List<KnowledgebaseEntry> entries = new ArrayList<>();
-            if (!resultList.isMissingNode() && !resultList.isNull() && resultList.isArray()) {
-                for (JsonNode result : resultList) {
-                    String content = result.path("content").asText("");
-                    JsonNode docMetaRawStr = result.path("doc_info").path("doc_meta");
-                    Map<String, String> entryMetadata = new HashMap<>();
-                    if (!docMetaRawStr.isMissingNode()
-                            && !docMetaRawStr.isNull()
-                            && docMetaRawStr.isTextual()) {
-                        JsonNode docMetaList = JSONUtil.parseJson(docMetaRawStr.asText());
-                        if (docMetaList.isArray()) {
-                            for (JsonNode meta : docMetaList) {
-                                String fieldName = meta.path("field_name").asText();
-                                String fieldValue = meta.path("field_value").asText();
-                                entryMetadata.put(fieldName, fieldValue);
-                            }
-                        }
-                    }
-                    entries.add(new KnowledgebaseEntry(content, entryMetadata));
-                }
-            }
-            return entries;
+            return parseKnowledgeEntries(JSONUtil.parseJson(response.getData()), false);
         } catch (IOException e) {
             log.error("searchKnowledge failed", e);
             return Collections.emptyList();
+        }
+    }
+
+    private static List<KnowledgebaseEntry> parseKnowledgeEntries(JsonNode rootNode, boolean strict)
+            throws IOException {
+        JsonNode resultList = rootNode.path("data").path("result_list");
+        if (!resultList.isArray()) {
+            if (strict) {
+                throw VikingApiKeyHttpClient.invalidResponse(
+                        "search knowledgebase",
+                        VikingApiKeyHttpClient.KNOWLEDGEBASE_SEARCH_PATH,
+                        rootNode);
+            }
+            return Collections.emptyList();
+        }
+
+        List<KnowledgebaseEntry> entries = new ArrayList<>();
+        for (JsonNode result : resultList) {
+            String content = result.path("content").asText("");
+            JsonNode docMetaRawStr = result.path("doc_info").path("doc_meta");
+            Map<String, String> entryMetadata = new HashMap<>();
+            if (docMetaRawStr.isTextual()) {
+                JsonNode docMetaList = JSONUtil.parseJson(docMetaRawStr.asText());
+                if (docMetaList.isArray()) {
+                    for (JsonNode meta : docMetaList) {
+                        String fieldName = meta.path("field_name").asText();
+                        String fieldValue = meta.path("field_value").asText();
+                        entryMetadata.put(fieldName, fieldValue);
+                    }
+                }
+            }
+            entries.add(new KnowledgebaseEntry(content, entryMetadata));
+        }
+        return entries;
+    }
+
+    private void requireManagementCredentials(String operation) {
+        if (!hasManagementCredentials) {
+            throw new IllegalStateException(
+                    "Viking Knowledgebase "
+                            + operation
+                            + " requires both VOLCENGINE_ACCESS_KEY and VOLCENGINE_SECRET_KEY.");
         }
     }
 }

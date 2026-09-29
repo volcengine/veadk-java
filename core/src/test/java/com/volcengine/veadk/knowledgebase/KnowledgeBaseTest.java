@@ -11,6 +11,7 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 import org.mockito.MockedConstruction;
 import org.mockito.MockedStatic;
@@ -101,14 +102,70 @@ class KnowledgeBaseTest {
                                                             vikingEntry(
                                                                     "viking answer", Map.of())));
                                 })) {
-            mockedEnv.when(EnvUtil::getAccessKey).thenReturn("ak");
-            mockedEnv.when(EnvUtil::getSecretKey).thenReturn("sk");
+            mockedEnv.when(EnvUtil::getOptionalAccessKey).thenReturn("ak");
+            mockedEnv.when(EnvUtil::getOptionalSecretKey).thenReturn("sk");
 
             KnowledgeBase knowledgeBase =
                     KnowledgeBase.builder().backend("viking").appName("KbApp").topK(4).build();
 
             assertEquals("viking answer", knowledgeBase.search("q").get(0).getContent());
         }
+    }
+
+    @Test
+    void builderPassesExplicitApiKeyToVikingBackend() {
+        AtomicReference<List<?>> constructorArguments = new AtomicReference<>();
+        try (MockedStatic<EnvUtil> mockedEnv = Mockito.mockStatic(EnvUtil.class);
+                MockedConstruction<VikingKnowledgebaseWrapper> mockedCtor =
+                        Mockito.mockConstruction(
+                                VikingKnowledgebaseWrapper.class,
+                                (mock, context) -> constructorArguments.set(context.arguments()))) {
+            mockedEnv
+                    .when(() -> EnvUtil.normalizeOptionalCredential("explicit-key"))
+                    .thenReturn("explicit-key");
+            mockedEnv
+                    .when(() -> EnvUtil.getVikingApiKey("explicit-key"))
+                    .thenReturn("explicit-key");
+
+            KnowledgeBase.builder()
+                    .backend("viking")
+                    .appName("KbApp")
+                    .apiKey("explicit-key")
+                    .build();
+
+            assertEquals(1, mockedCtor.constructed().size());
+            assertEquals(3, constructorArguments.get().size());
+            assertEquals("explicit-key", constructorArguments.get().get(2));
+        }
+    }
+
+    @Test
+    void builderRejectsApiKeyForNamedNonVikingBackend() {
+        assertThrows(
+                IllegalArgumentException.class,
+                () ->
+                        KnowledgeBase.builder()
+                                .backend("opensearch")
+                                .index("index")
+                                .apiKey("api-key")
+                                .build());
+    }
+
+    @Test
+    void builderIgnoresApiKeyForCustomBackendInstance() {
+        FakeBackend backend = new FakeBackend();
+
+        KnowledgeBase knowledgeBase =
+                KnowledgeBase.builder().backendInstance(backend).apiKey("api-key").build();
+
+        assertEquals(
+                "answer",
+                knowledgeBase
+                        .searchKnowledgebase("q")
+                        .blockingGet()
+                        .getKnowledgebaseEntries()
+                        .get(0)
+                        .getContent());
     }
 
     private static com.volcengine.veadk.integration.vikingknowledgebase.KnowledgebaseEntry

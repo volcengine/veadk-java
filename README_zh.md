@@ -89,9 +89,28 @@ export MODEL_AGENT_API_KEY="<your-ark-api-key>"
 - 使用 IntelliJ IDEA 或 Eclipse 导入 Maven 多模块工程。
 - 直接运行 `AgentCliRunner` 或 `AdkWeb` 的 `main` 方法即可。
 - 确保在 IDE 的运行配置中注入必需环境变量（或使用 shell 启动 IDE）。
-- 如果需要使用web search、viking memory、viking knowledgebase，需要配置环境变化：
+- 如果需要使用 web search、Viking 资源管理，或继续通过 AK/SK 使用 Viking Memory 与 Viking Knowledgebase，需要配置以下环境变量：
   - VOLCENGINE_ACCESS_KEY：火山引擎AccessKey
   - VOLCENGINE_SECRET_KEY：火山引擎SecretKey
+- 对于已存在的 collection，Viking 数据面操作也支持独立 API Key：
+  - `DATABASE_VIKING_API_KEY`：搜索 Viking Knowledgebase collection
+  - `DATABASE_VIKINGMEM_API_KEY`：添加和检索 Viking Memory
+  - `KnowledgeBase.Builder.apiKey(String)` 与 `VikingMemoryService(String, String)` 可按实例显式配置。有效显式值优先于对应环境变量；空字符串、纯空白、`none` 和 `null` 会回退到环境变量。
+  - 仅配置 API Key 时，初始化会跳过 collection 存在性检查和自动创建。collection 与文档管理（包括 Knowledgebase `addDoc`）仍需同时配置 `VOLCENGINE_ACCESS_KEY` 和 `VOLCENGINE_SECRET_KEY`；API Key 鉴权或服务失败后不会降级为 AK/SK。
+
+以下示例使用占位 API Key，目标 collection 需要预先存在：
+
+```java
+KnowledgeBase knowledgeBase =
+        KnowledgeBase.builder()
+                .backend("viking")
+                .appName("existing_knowledge_collection")
+                .apiKey("YOUR_VIKING_KNOWLEDGEBASE_API_KEY")
+                .build();
+VikingMemoryService memoryService =
+        new VikingMemoryService(
+                "existing_memory_collection", "YOUR_VIKING_MEMORY_API_KEY");
+```
 - 如果需要使用 Mem0 Memory，可以直接配置 Mem0 API Key：
   - `DATABASE_MEM0_API_KEY`：Mem0 API Key
   - `DATABASE_MEM0_BASE_URL`：Mem0 服务地址，例如 `https://api.mem0.ai`

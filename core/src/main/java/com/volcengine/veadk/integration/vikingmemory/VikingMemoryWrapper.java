@@ -26,6 +26,8 @@ import com.volcengine.model.Credentials;
 import com.volcengine.model.ServiceInfo;
 import com.volcengine.model.response.RawResponse;
 import com.volcengine.service.BaseServiceImpl;
+import com.volcengine.veadk.integration.VikingApiKeyHttpClient;
+import com.volcengine.veadk.utils.EnvUtil;
 import com.volcengine.veadk.utils.JSONUtil;
 import java.io.IOException;
 import java.util.ArrayList;
@@ -34,6 +36,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.http.Header;
 import org.apache.http.message.BasicHeader;
 import org.slf4j.Logger;
@@ -135,13 +138,35 @@ public class VikingMemoryWrapper extends BaseServiceImpl {
                 }
             };
 
+    private final boolean hasManagementCredentials;
+    private final VikingApiKeyHttpClient apiKeyClient;
+
     public VikingMemoryWrapper(String accessKey, String secretKey) {
+        this(accessKey, secretKey, (String) null);
+    }
+
+    public VikingMemoryWrapper(String accessKey, String secretKey, String apiKey) {
+        this(
+                accessKey,
+                secretKey,
+                EnvUtil.normalizeOptionalCredential(apiKey) == null
+                        ? null
+                        : new VikingApiKeyHttpClient(EnvUtil.normalizeOptionalCredential(apiKey)));
+    }
+
+    VikingMemoryWrapper(String accessKey, String secretKey, VikingApiKeyHttpClient apiKeyClient) {
         super(SERVICE_INFO, API_INFO_LIST);
-        setAccessKey(accessKey);
-        setSecretKey(secretKey);
+        this.hasManagementCredentials =
+                StringUtils.isNotBlank(accessKey) && StringUtils.isNotBlank(secretKey);
+        this.apiKeyClient = apiKeyClient;
+        if (hasManagementCredentials) {
+            setAccessKey(accessKey);
+            setSecretKey(secretKey);
+        }
     }
 
     public boolean isCollectionExists(String collectionName) {
+        requireManagementCredentials("get collection");
         try {
             Map<String, String> body = new HashMap<>();
             body.put("CollectionName", collectionName);
@@ -174,6 +199,7 @@ public class VikingMemoryWrapper extends BaseServiceImpl {
     }
 
     public boolean createCollection(String collectionName, List<String> builtinEventTypes) {
+        requireManagementCredentials("create collection");
         try {
             Map<String, Object> body = new HashMap<>();
             body.put("CollectionName", collectionName);
@@ -212,6 +238,17 @@ public class VikingMemoryWrapper extends BaseServiceImpl {
         body.put("metadata", metadata);
 
         String bodyStr = JSONUtil.toJson(body);
+        if (apiKeyClient != null) {
+            JsonNode root =
+                    apiKeyClient.post(
+                            "add memory session", VikingApiKeyHttpClient.MEMORY_ADD_PATH, body);
+            JsonNode sessionIdNode = root.path("data").path("session_id");
+            if (!sessionIdNode.isTextual() || StringUtils.isBlank(sessionIdNode.asText())) {
+                throw VikingApiKeyHttpClient.invalidResponse(
+                        "add memory session", VikingApiKeyHttpClient.MEMORY_ADD_PATH, root);
+            }
+            return true;
+        }
 
         RawResponse response = json("AddSession", null, bodyStr);
         if (response.getCode() != SdkError.SUCCESS.getNumber()) {
@@ -242,6 +279,12 @@ public class VikingMemoryWrapper extends BaseServiceImpl {
         body.put("limit", topK);
 
         String bodyStr = JSONUtil.toJson(body);
+        if (apiKeyClient != null) {
+            return parseMemoryEntries(
+                    apiKeyClient.post(
+                            "search memory", VikingApiKeyHttpClient.MEMORY_SEARCH_PATH, body),
+                    true);
+        }
 
         RawResponse response = json("SearchMemory", null, bodyStr);
         if (response.getCode() != SdkError.SUCCESS.getNumber()) {
@@ -253,23 +296,30 @@ public class VikingMemoryWrapper extends BaseServiceImpl {
                 bodyStr,
                 JSONUtil.parseJson(response.getData()));
 
-        JsonNode rootNode = JSONUtil.parseJson(response.getData());
-        JsonNode resultList = rootNode.path("data").path("result_list");
-        List<MemoryEntry> memoryEntries = new ArrayList<>();
+        return parseMemoryEntries(JSONUtil.parseJson(response.getData()), false);
+    }
 
-        if (!resultList.isMissingNode() && !resultList.isNull() && resultList.isArray()) {
-            for (JsonNode resultNode : resultList) {
-                JsonNode summaryNode = resultNode.path("memory_info").path("summary");
-                if (!summaryNode.isMissingNode() && !summaryNode.isNull()) {
-                    memoryEntries.add(buildMemoryEntry("user", summaryNode.asText()));
-                }
+    private List<MemoryEntry> parseMemoryEntries(JsonNode rootNode, boolean strict) {
+        JsonNode resultList = rootNode.path("data").path("result_list");
+        if (!resultList.isArray()) {
+            if (strict) {
+                throw VikingApiKeyHttpClient.invalidResponse(
+                        "search memory", VikingApiKeyHttpClient.MEMORY_SEARCH_PATH, rootNode);
             }
+            return Collections.emptyList();
         }
 
+        List<MemoryEntry> memoryEntries = new ArrayList<>();
+        for (JsonNode resultNode : resultList) {
+            JsonNode summaryNode = resultNode.path("memory_info").path("summary");
+            if (!summaryNode.isMissingNode() && !summaryNode.isNull()) {
+                memoryEntries.add(buildMemoryEntry("user", summaryNode.asText()));
+            }
+        }
         return memoryEntries;
     }
 
-    private MemoryEntry buildMemoryEntry(String role, String text) {
+    private static MemoryEntry buildMemoryEntry(String role, String text) {
         return MemoryEntry.builder()
                 .author(role)
                 .content(
@@ -278,5 +328,14 @@ public class VikingMemoryWrapper extends BaseServiceImpl {
                                 .parts(Collections.singletonList(Part.builder().text(text).build()))
                                 .build())
                 .build();
+    }
+
+    private void requireManagementCredentials(String operation) {
+        if (!hasManagementCredentials) {
+            throw new IllegalStateException(
+                    "Viking Memory "
+                            + operation
+                            + " requires both VOLCENGINE_ACCESS_KEY and VOLCENGINE_SECRET_KEY.");
+        }
     }
 }

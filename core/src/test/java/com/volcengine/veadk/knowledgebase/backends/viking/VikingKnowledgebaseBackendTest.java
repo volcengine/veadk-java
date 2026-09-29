@@ -43,8 +43,8 @@ class VikingKnowledgebaseBackendTest {
                                 (mock, context) -> {
                                     when(mock.isCollectionExists(collectionName)).thenReturn(false);
                                 })) {
-            mockedEnv.when(EnvUtil::getAccessKey).thenReturn("ak");
-            mockedEnv.when(EnvUtil::getSecretKey).thenReturn("sk");
+            mockedEnv.when(EnvUtil::getOptionalAccessKey).thenReturn("ak");
+            mockedEnv.when(EnvUtil::getOptionalSecretKey).thenReturn("sk");
 
             new VikingKnowledgebaseBackend(collectionName);
 
@@ -64,8 +64,8 @@ class VikingKnowledgebaseBackendTest {
                                 (mock, context) -> {
                                     when(mock.isCollectionExists(collectionName)).thenReturn(true);
                                 })) {
-            mockedEnv.when(EnvUtil::getAccessKey).thenReturn("ak");
-            mockedEnv.when(EnvUtil::getSecretKey).thenReturn("sk");
+            mockedEnv.when(EnvUtil::getOptionalAccessKey).thenReturn("ak");
+            mockedEnv.when(EnvUtil::getOptionalSecretKey).thenReturn("sk");
 
             new VikingKnowledgebaseBackend(collectionName);
 
@@ -73,6 +73,27 @@ class VikingKnowledgebaseBackendTest {
             verify(wrapper).isCollectionExists(collectionName);
             verify(wrapper, never()).createCollection(collectionName);
         }
+    }
+
+    @Test
+    void constructor_apiKeyOnly_shouldSkipCollectionManagement() {
+        VikingKnowledgebaseConfig config =
+                new VikingKnowledgebaseConfig(null, null, "api-key", true, 3);
+        try (MockedConstruction<VikingKnowledgebaseWrapper> mockedCtor =
+                Mockito.mockConstruction(VikingKnowledgebaseWrapper.class)) {
+            new VikingKnowledgebaseBackend("KbApp", config);
+
+            VikingKnowledgebaseWrapper wrapper = mockedCtor.constructed().get(0);
+            verify(wrapper, never()).isCollectionExists("KbApp");
+            verify(wrapper, never()).createCollection("KbApp");
+        }
+    }
+
+    @Test
+    void configWithoutAnyCredentials_shouldFailClearly() {
+        assertThrows(
+                IllegalStateException.class,
+                () -> new VikingKnowledgebaseConfig(null, null, null, true, 3));
     }
 
     @Test

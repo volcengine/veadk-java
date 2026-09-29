@@ -46,6 +46,41 @@ class EnvUtilTest {
     }
 
     @Test
+    @SetEnvironmentVariable(key = "DATABASE_VIKING_API_KEY", value = " env-kb-key ")
+    void getVikingApiKey_explicitValueTakesPrecedence() {
+        assertThat(EnvUtil.getVikingApiKey(" explicit-kb-key ")).isEqualTo("explicit-kb-key");
+    }
+
+    @Test
+    @SetEnvironmentVariable(key = "DATABASE_VIKING_API_KEY", value = " env-kb-key ")
+    void getVikingApiKey_invalidExplicitValueFallsBackToEnvironment() {
+        assertThat(EnvUtil.getVikingApiKey(" NuLl ")).isEqualTo("env-kb-key");
+    }
+
+    @Test
+    @SetEnvironmentVariable(key = "DATABASE_VIKINGMEM_API_KEY", value = " memory-key ")
+    @SetEnvironmentVariable(key = "DATABASE_VIKING_API_KEY", value = " kb-key ")
+    void vikingApiKeys_areIndependent() {
+        assertThat(EnvUtil.getVikingApiKey(null)).isEqualTo("kb-key");
+        assertThat(EnvUtil.getVikingMemoryApiKey(null)).isEqualTo("memory-key");
+    }
+
+    @Test
+    @ClearEnvironmentVariable(key = "DATABASE_VIKINGMEM_API_KEY")
+    void getVikingMemoryApiKey_invalidValuesAreMissing() {
+        assertThat(EnvUtil.getVikingMemoryApiKey(" ")).isNull();
+        assertThat(EnvUtil.normalizeOptionalCredential("NONE")).isNull();
+        assertThat(EnvUtil.normalizeOptionalCredential(" null ")).isNull();
+    }
+
+    @Test
+    void hasVolcengineCredentials_requiresCompletePair() {
+        assertThat(EnvUtil.hasVolcengineCredentials("ak", "sk")).isTrue();
+        assertThat(EnvUtil.hasVolcengineCredentials("ak", " ")).isFalse();
+        assertThat(EnvUtil.hasVolcengineCredentials(null, "sk")).isFalse();
+    }
+
+    @Test
     @SetEnvironmentVariable(
             key = "OBSERVABILITY_OPENTELEMETRY_TLS_ENDPOINT",
             value = "test_tls_endpoint")

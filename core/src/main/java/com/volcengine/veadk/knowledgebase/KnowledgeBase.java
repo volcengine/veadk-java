@@ -18,6 +18,8 @@ package com.volcengine.veadk.knowledgebase;
 import com.volcengine.veadk.knowledgebase.backends.BaseKnowledgebaseBackend;
 import com.volcengine.veadk.knowledgebase.backends.opensearch.OpensearchKnowledgebaseBackend;
 import com.volcengine.veadk.knowledgebase.backends.viking.VikingKnowledgebaseBackend;
+import com.volcengine.veadk.knowledgebase.backends.viking.VikingKnowledgebaseConfig;
+import com.volcengine.veadk.utils.EnvUtil;
 import io.reactivex.rxjava3.core.Completable;
 import io.reactivex.rxjava3.core.Single;
 import java.io.IOException;
@@ -117,6 +119,7 @@ public class KnowledgeBase implements BaseKnowledgebaseService, AutoCloseable {
         private String appName = "";
         private String index = "";
         private int topK = 10;
+        private String apiKey;
         private BaseKnowledgebaseBackend backendInstance;
 
         public Builder backend(String backend) {
@@ -142,6 +145,11 @@ public class KnowledgeBase implements BaseKnowledgebaseService, AutoCloseable {
             return this;
         }
 
+        public Builder apiKey(String apiKey) {
+            this.apiKey = apiKey;
+            return this;
+        }
+
         public Builder backendInstance(BaseKnowledgebaseBackend backendInstance) {
             this.backendInstance = backendInstance;
             return this;
@@ -159,10 +167,15 @@ public class KnowledgeBase implements BaseKnowledgebaseService, AutoCloseable {
                 throw new IllegalArgumentException("Either index or appName must be provided.");
             }
             if ("opensearch".equalsIgnoreCase(backend)) {
+                if (EnvUtil.normalizeOptionalCredential(apiKey) != null) {
+                    throw new IllegalArgumentException(
+                            "apiKey is only supported by the viking knowledgebase backend.");
+                }
                 return new OpensearchKnowledgebaseBackend(resolvedIndex);
             }
             if ("viking".equalsIgnoreCase(backend)) {
-                return new VikingKnowledgebaseBackend(resolvedIndex);
+                return new VikingKnowledgebaseBackend(
+                        resolvedIndex, VikingKnowledgebaseConfig.fromEnv(apiKey));
             }
             throw new IllegalArgumentException("Unsupported knowledgebase backend: " + backend);
         }

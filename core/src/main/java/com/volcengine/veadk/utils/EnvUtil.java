@@ -22,6 +22,8 @@ public class EnvUtil {
     // env
     private static final String VOLCENGINE_ACCESS_KEY = "VOLCENGINE_ACCESS_KEY";
     private static final String VOLCENGINE_SECRET_KEY = "VOLCENGINE_SECRET_KEY";
+    private static final String VIKING_API_KEY = "DATABASE_VIKING_API_KEY";
+    private static final String VIKINGMEM_API_KEY = "DATABASE_VIKINGMEM_API_KEY";
     private static final String TLS_ENDPOINT = "OBSERVABILITY_OPENTELEMETRY_TLS_ENDPOINT";
     private static final String TLS_SERVICE_NAME = "OBSERVABILITY_OPENTELEMETRY_TLS_SERVICE_NAME";
     private static final String TLS_REGION = "OBSERVABILITY_OPENTELEMETRY_TLS_REGION";
@@ -97,6 +99,36 @@ public class EnvUtil {
             throw getIllegalStateException(VOLCENGINE_SECRET_KEY);
         }
         return secretKey;
+    }
+
+    public static String getOptionalAccessKey() {
+        return StringUtils.trimToNull(System.getenv(VOLCENGINE_ACCESS_KEY));
+    }
+
+    public static String getOptionalSecretKey() {
+        return StringUtils.trimToNull(System.getenv(VOLCENGINE_SECRET_KEY));
+    }
+
+    public static boolean hasVolcengineCredentials(String accessKey, String secretKey) {
+        return StringUtils.isNotBlank(accessKey) && StringUtils.isNotBlank(secretKey);
+    }
+
+    public static String getVikingApiKey(String explicitApiKey) {
+        return resolveOptionalCredential(explicitApiKey, VIKING_API_KEY);
+    }
+
+    public static String getVikingMemoryApiKey(String explicitApiKey) {
+        return resolveOptionalCredential(explicitApiKey, VIKINGMEM_API_KEY);
+    }
+
+    public static String normalizeOptionalCredential(String value) {
+        String normalized = StringUtils.trimToNull(value);
+        if (normalized == null
+                || "none".equalsIgnoreCase(normalized)
+                || "null".equalsIgnoreCase(normalized)) {
+            return null;
+        }
+        return normalized;
     }
 
     public static String getRegion() {
@@ -180,5 +212,12 @@ public class EnvUtil {
                 "Missing required configuration: "
                         + configName
                         + ". Please configure the environment variable before startup.");
+    }
+
+    private static String resolveOptionalCredential(String explicitValue, String environmentName) {
+        String normalizedExplicitValue = normalizeOptionalCredential(explicitValue);
+        return normalizedExplicitValue != null
+                ? normalizedExplicitValue
+                : normalizeOptionalCredential(System.getenv(environmentName));
     }
 }
