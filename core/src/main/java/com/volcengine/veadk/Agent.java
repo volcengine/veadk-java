@@ -24,9 +24,15 @@ import com.google.adk.memory.BaseMemoryService;
 import com.google.adk.models.BaseLlm;
 import com.google.adk.tools.BaseTool;
 import com.google.adk.tools.BaseToolset;
+import com.google.adk.tools.LoadMemoryTool;
+import com.google.common.collect.ImmutableList;
 import com.google.genai.types.GenerateContentConfig;
 import com.google.genai.types.Schema;
+import com.volcengine.veadk.agent.SaveSessionToMemoryCallback;
 import com.volcengine.veadk.knowledgebase.BaseKnowledgebaseService;
+import com.volcengine.veadk.tools.knowledgebase.LoadKnowledgebaseTool;
+import io.reactivex.rxjava3.core.Maybe;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
@@ -40,6 +46,8 @@ public final class Agent extends LlmAgent {
     public static final String DEFAULT_DESCRIPTION = "A helpful VeADK agent.";
     public static final String DEFAULT_INSTRUCTION = "You are a helpful assistant.";
     public static final String DEFAULT_MODEL_NAME = "doubao-seed-2-1-pro-260628";
+    public static final String AUTO_TOOL_METADATA_KEY = "veadk.autoTool";
+    public static final String AUTO_TOOL_SOURCE_METADATA_KEY = "veadk.autoToolSource";
 
     private final BaseMemoryService longTermMemoryService;
     private final BaseKnowledgebaseService knowledgebaseService;
@@ -90,6 +98,8 @@ public final class Agent extends LlmAgent {
         private String instructionSummary = "";
         private List<String> explicitToolNames = List.of();
         private List<String> autoToolNames = List.of();
+        private List<Object> explicitTools = List.of();
+        private List<Callbacks.AfterAgentCallback> explicitAfterAgentCallbacks = List.of();
 
         public Builder() {
             name(DEFAULT_NAME);
@@ -186,14 +196,23 @@ public final class Agent extends LlmAgent {
 
         @Override
         public Builder afterAgentCallback(Callbacks.AfterAgentCallback afterAgentCallback) {
-            super.afterAgentCallback(afterAgentCallback);
+            Callbacks.AfterAgentCallback resolvedCallback =
+                    Objects.requireNonNull(afterAgentCallback, "afterAgentCallback must be set.");
+            super.afterAgentCallback(resolvedCallback);
+            this.explicitAfterAgentCallbacks = List.of(resolvedCallback);
             return this;
         }
 
         @Override
         public Builder afterAgentCallbackSync(
                 Callbacks.AfterAgentCallbackSync afterAgentCallbackSync) {
-            super.afterAgentCallbackSync(afterAgentCallbackSync);
+            Callbacks.AfterAgentCallbackSync resolvedCallback =
+                    Objects.requireNonNull(
+                            afterAgentCallbackSync, "afterAgentCallbackSync must be set.");
+            Callbacks.AfterAgentCallback callback =
+                    callbackContext -> Maybe.fromOptional(resolvedCallback.call(callbackContext));
+            super.afterAgentCallback(callback);
+            this.explicitAfterAgentCallbacks = List.of(callback);
             return this;
         }
 
@@ -241,15 +260,21 @@ public final class Agent extends LlmAgent {
 
         @Override
         public Builder tools(List<?> tools) {
-            super.tools(tools);
-            this.explicitToolNames = toolNames(tools);
+            List<?> resolvedTools =
+                    List.copyOf(Objects.requireNonNull(tools, "tools must be set."));
+            super.tools(resolvedTools);
+            this.explicitTools = List.copyOf(resolvedTools);
+            this.explicitToolNames = toolNames(resolvedTools);
             return this;
         }
 
         @Override
         public Builder tools(Object... tools) {
-            super.tools(tools);
-            this.explicitToolNames = toolNames(Arrays.asList(tools));
+            List<?> resolvedTools =
+                    List.copyOf(Arrays.asList(Objects.requireNonNull(tools, "tools must be set.")));
+            super.tools(resolvedTools);
+            this.explicitTools = List.copyOf(resolvedTools);
+            this.explicitToolNames = toolNames(resolvedTools);
             return this;
         }
 
@@ -405,8 +430,56 @@ public final class Agent extends LlmAgent {
 
         @Override
         public Agent build() {
+            prepareAutoComponents();
             validate();
             return new Agent(this);
+        }
+
+        private void prepareAutoComponents() {
+            List<Object> tools = new ArrayList<>(explicitTools);
+            List<String> generatedAutoToolNames = new ArrayList<>();
+
+            if (knowledgebaseService != null && !containsToolNamed(tools, "loadKnowledgebase")) {
+                BaseTool knowledgebaseTool =
+                        markAutoTool(
+                                new LoadKnowledgebaseTool(knowledgebaseService), "knowledgebase");
+                tools.add(knowledgebaseTool);
+                generatedAutoToolNames.add(knowledgebaseTool.name());
+            }
+
+            if (longTermMemoryService != null && !containsToolNamed(tools, "loadMemory")) {
+                BaseTool memoryTool = markAutoTool(new LoadMemoryTool(), "memory");
+                tools.add(memoryTool);
+                generatedAutoToolNames.add(memoryTool.name());
+            }
+
+            this.autoToolNames = List.copyOf(generatedAutoToolNames);
+            super.tools(tools);
+
+            List<Callbacks.AfterAgentCallback> afterAgentCallbacks =
+                    new ArrayList<>(explicitAfterAgentCallbacks);
+            if (autoSaveSession && !containsSaveSessionCallback(afterAgentCallbacks)) {
+                afterAgentCallbacks.add(new SaveSessionToMemoryCallback());
+            }
+            this.afterAgentCallback = ImmutableList.copyOf(afterAgentCallbacks);
+        }
+
+        private static BaseTool markAutoTool(BaseTool tool, String source) {
+            tool.setCustomMetadata(AUTO_TOOL_METADATA_KEY, true);
+            tool.setCustomMetadata(AUTO_TOOL_SOURCE_METADATA_KEY, source);
+            return tool;
+        }
+
+        private static boolean containsToolNamed(List<?> tools, String name) {
+            return tools.stream()
+                    .filter(BaseTool.class::isInstance)
+                    .map(BaseTool.class::cast)
+                    .anyMatch(tool -> tool.name().equals(name));
+        }
+
+        private static boolean containsSaveSessionCallback(
+                List<Callbacks.AfterAgentCallback> callbacks) {
+            return callbacks.stream().anyMatch(SaveSessionToMemoryCallback.class::isInstance);
         }
 
         private AgentMetadataSnapshot metadataSnapshot(String name, String description) {

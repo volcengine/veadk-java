@@ -21,6 +21,7 @@ import com.google.adk.memory.BaseMemoryService;
 import com.google.adk.memory.InMemoryMemoryService;
 import com.google.adk.sessions.InMemorySessionService;
 import com.google.common.collect.ImmutableList;
+import com.volcengine.veadk.Agent;
 
 public class Runner extends com.google.adk.runner.Runner {
 
@@ -42,7 +43,18 @@ public class Runner extends com.google.adk.runner.Runner {
                 appName,
                 new InMemoryArtifactService(),
                 new InMemorySessionService(),
-                null != baseMemoryService ? baseMemoryService : new InMemoryMemoryService(),
+                resolveMemoryService(agent, baseMemoryService),
                 ImmutableList.of());
+    }
+
+    private static BaseMemoryService resolveMemoryService(
+            BaseAgent agent, BaseMemoryService baseMemoryService) {
+        if (baseMemoryService != null) {
+            return baseMemoryService;
+        }
+        if (agent instanceof Agent veadkAgent) {
+            return veadkAgent.longTermMemoryService().orElseGet(InMemoryMemoryService::new);
+        }
+        return new InMemoryMemoryService();
     }
 }
