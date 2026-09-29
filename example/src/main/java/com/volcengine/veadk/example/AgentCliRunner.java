@@ -31,7 +31,7 @@ public class AgentCliRunner {
     public static void main(String[] args) {
 
         RunConfig runConfig =
-                RunConfig.builder().setStreamingMode(RunConfig.StreamingMode.NONE).build();
+                RunConfig.builder().streamingMode(RunConfig.StreamingMode.NONE).build();
 
         Runner runner = new Runner(ArkAgent.ROOT_AGENT);
 
@@ -46,7 +46,7 @@ public class AgentCliRunner {
         String sessionId = "session";
         Session session =
                 runner.sessionService()
-                        .createSession(runner.appName(), userId, null, sessionId)
+                        .createSession(runner.appName(), userId, java.util.Map.of(), sessionId)
                         .blockingGet();
 
         try (Scanner scanner = new Scanner(System.in, UTF_8)) {

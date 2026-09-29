@@ -112,7 +112,7 @@ public class VikingMemoryService implements BaseMemoryService {
                     List<MemoryEntry> memoryEntries =
                             vikingMemoryWrapper.searchMemory(
                                     appName, userId, query, topK, this.builtinEventTypes);
-                    return SearchMemoryResponse.builder().setMemories(memoryEntries).build();
+                    return SearchMemoryResponse.builder().memories(memoryEntries).build();
                 });
     }
 }

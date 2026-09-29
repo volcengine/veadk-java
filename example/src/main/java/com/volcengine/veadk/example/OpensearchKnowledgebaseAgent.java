@@ -86,13 +86,13 @@ public class OpensearchKnowledgebaseAgent {
 
             Runner runner = new Runner(agent);
             RunConfig runConfig =
-                    RunConfig.builder().setStreamingMode(RunConfig.StreamingMode.NONE).build();
+                    RunConfig.builder().streamingMode(RunConfig.StreamingMode.NONE).build();
 
             String userId = "user";
             String sessionId = "opensearch-knowledgebase-session";
             Session session =
                     runner.sessionService()
-                            .createSession(runner.appName(), userId, null, sessionId)
+                            .createSession(runner.appName(), userId, java.util.Map.of(), sessionId)
                             .blockingGet();
 
             try (Scanner scanner = new Scanner(System.in, UTF_8)) {

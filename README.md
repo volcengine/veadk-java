@@ -15,11 +15,11 @@ An open-source Agent development toolkit that integrates the powerful capabiliti
 </dependency>
 ```
 
-### Agent Facade
+### Agent
 
-Use `Agent.builder()` as the VeADK entry point. It keeps the ADK Java `LlmAgent`
-execution path, while adding VeADK defaults and metadata that integrations can
-read without reflection.
+Use `Agent.builder()` as the VeADK Java entry point. It keeps the ADK Java
+`LlmAgent` execution path, while adding VeADK defaults and metadata that
+integrations can read without reflection.
 
 ```java
 import com.volcengine.veadk.Agent;
@@ -110,11 +110,12 @@ In the repository root, run: `./mvnw clean -DskipTests package`
 
 After building, the compiled artifacts needed by the examples will be generated in `example/target`.
 
-Run the metadata-only Agent facade example. It does not call Ark and can run
-without a real model API key:
+Run the Agent example. It builds an Ark-backed `Agent`, registers a Java
+function tool, and calls `Runner.run(...)` directly:
 
 ```bash
-./mvnw -pl example -am -q compile exec:java -Dexec.mainClass=com.volcengine.veadk.example.AgentFacadeExample
+export MODEL_AGENT_API_KEY="<your-ark-api-key>"
+./mvnw -pl example -am -q compile exec:java -Dexec.mainClass=com.volcengine.veadk.example.AgentExample
 ```
 
 ### Run the Example (CLI)
@@ -170,11 +171,11 @@ Run the Mem0 memory example:
 ## Related Projects
 - Python version and documentation: [veadk-python](https://github.com/volcengine/veadk-python).
 
-## PR0 Scope
+## Current Scope
 
-The Java facade intentionally starts with a small, typed contract. It matches the
+The Java Agent intentionally starts with a small, typed contract. It matches the
 Python package at the user-entry level (`Agent.builder()`, model, tools,
-sub-agents, memory/knowledgebase metadata), but Java records metadata from
+sub-agents, memory/knowledgebase metadata), while Java records metadata from
 explicit builder state and ADK public accessors instead of dynamically scanning
 object internals.
 

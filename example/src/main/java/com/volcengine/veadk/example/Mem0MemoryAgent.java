@@ -58,7 +58,7 @@ public class Mem0MemoryAgent {
                 Mem0MemoryService.builder().appName(APP_NAME).topK(5).build();
         Runner runner = new Runner(agent, memoryService);
         RunConfig runConfig =
-                RunConfig.builder().setStreamingMode(RunConfig.StreamingMode.NONE).build();
+                RunConfig.builder().streamingMode(RunConfig.StreamingMode.NONE).build();
 
         String userId = "user";
         String sessionId = "mem0-session";
@@ -91,7 +91,8 @@ public class Mem0MemoryAgent {
                 .getSession(runner.appName(), userId, sessionId, Optional.empty())
                 .switchIfEmpty(
                         runner.sessionService()
-                                .createSession(runner.appName(), userId, null, sessionId))
+                                .createSession(
+                                        runner.appName(), userId, java.util.Map.of(), sessionId))
                 .blockingGet();
     }
 }

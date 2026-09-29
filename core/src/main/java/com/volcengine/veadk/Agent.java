@@ -41,7 +41,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.Executor;
 
-/** VeADK Agent facade that keeps ADK Java's LlmAgent execution path. */
+/** VeADK Agent that keeps ADK Java's LlmAgent execution path. */
 public final class Agent extends LlmAgent {
 
     public static final String DEFAULT_NAME = "veAgent";
@@ -567,7 +567,7 @@ public final class Agent extends LlmAgent {
         private static UnsupportedOperationException unsupportedPythonOption(String optionName) {
             return new UnsupportedOperationException(
                     optionName
-                            + " is not supported in Agent PR-0. The Java Agent facade keeps this"
+                            + " is not supported in Agent PR-0. The Java Agent keeps this"
                             + " Python-side option fail-fast until a typed Java design is added.");
         }
     }

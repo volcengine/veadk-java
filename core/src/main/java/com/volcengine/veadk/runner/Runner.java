@@ -47,7 +47,11 @@ public class Runner extends com.google.adk.runner.Runner {
         this(agent, agent.name(), baseMemoryService);
     }
 
+    @SuppressWarnings("deprecation")
     public Runner(BaseAgent agent, String appName, BaseMemoryService baseMemoryService) {
+        // ADK prefers Runner.builder() for direct construction, but Java subclass constructors
+        // must call a superclass constructor. Keep inheritance to preserve ADK Runner
+        // compatibility.
         super(
                 agent,
                 appName,
@@ -88,7 +92,7 @@ public class Runner extends com.google.adk.runner.Runner {
 
         Session session =
                 sessionService()
-                        .createSession(appName(), resolvedUserId, null, sessionId)
+                        .createSession(appName(), resolvedUserId, java.util.Map.of(), sessionId)
                         .blockingGet();
         List<Event> events =
                 runAsync(session.userId(), session.id(), content, runConfig).toList().blockingGet();

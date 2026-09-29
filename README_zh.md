@@ -15,7 +15,7 @@
 </dependency>
 ```
 
-### Agent Facade
+### Agent
 
 建议优先使用 `Agent.builder()` 作为 VeADK 的 Java 入口。它仍复用 ADK Java
 `LlmAgent` 的执行链路，同时补充 VeADK 默认值和可被集成侧读取的 metadata。
@@ -105,11 +105,12 @@ export MODEL_AGENT_API_KEY="<your-ark-api-key>"
 
 构建完成后，`example/target` 会生成示例所需的编译产物。
 
-运行只打印 metadata 的 Agent facade 示例。它不会真实调用 Ark，也不需要真实模型
-API key：
+运行 Agent 示例。它会构建一个使用 Ark 模型的 `Agent`，注册一个 Java 函数工具，并直接
+调用 `Runner.run(...)`：
 
 ```bash
-./mvnw -pl example -am -q compile exec:java -Dexec.mainClass=com.volcengine.veadk.example.AgentFacadeExample
+export MODEL_AGENT_API_KEY="<your-ark-api-key>"
+./mvnw -pl example -am -q compile exec:java -Dexec.mainClass=com.volcengine.veadk.example.AgentExample
 ```
 
 ### 运行示例（CLI）
@@ -165,9 +166,9 @@ API key：
 ## 相关项目
 - Python 版本与文档参考：[veadk-python](https://github.com/volcengine/veadk-python)。
 
-## PR0 范围
+## 当前范围
 
-Java facade 当前先提供小而稳定的类型化契约。它在用户入口上对齐 Python 版本
+Java Agent 当前先提供小而稳定的类型化契约。它在用户入口上对齐 Python 版本
 （`Agent.builder()`、模型、工具、sub-agents、memory/knowledgebase metadata），但
 metadata 来自 builder 阶段记录的显式状态和 ADK public getter，不通过运行时反射扫
 对象内部字段。
