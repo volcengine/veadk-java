@@ -29,8 +29,14 @@ Agent agent = Agent.builder()
     .description("Answers user questions.")
     .instruction("You are a helpful assistant.")
     .modelName("doubao-seed-2-1-pro-260628")
+    .modelApiKey(System.getenv("MODEL_AGENT_API_KEY"))
     .build();
 ```
+
+`modelName(...)` creates a default `ArkLlm` at build time. Configure the Ark API
+key with `modelApiKey(...)`, or leave it unset to read `MODEL_AGENT_API_KEY`
+from the environment. Use `modelApiBase(...)` / `modelBaseUrl(...)` when you
+need a custom Ark endpoint.
 
 You can also provide an explicit ADK `BaseLlm` instance when you want to own the
 model configuration yourself:
@@ -61,6 +67,14 @@ AgentMetadata metadata = AgentMetadataExtractor.extract(agent);
 System.out.println(metadata.tools());
 ```
 
+For a simple blocking interaction, use the VeADK runner convenience API:
+
+```java
+import com.volcengine.veadk.runner.Runner;
+
+String answer = new Runner(agent).run("Hello");
+```
+
 The extracted metadata includes:
 
 - Basic agent fields: `id`, `name`, `description`, `instructionSummary`, `modelName`,
@@ -77,8 +91,9 @@ The extracted metadata includes:
   are `web_search`, `loadKnowledgebase`, and `loadMemory`.
 
 ### Required Environment Variables
-Examples that instantiate or call `ArkLlm` require the following environment
-variable before running (an explicit error is thrown if missing):
+Examples that instantiate or call `ArkLlm` without an explicit API key require
+the following environment variable before running (an explicit error is thrown
+if missing):
 
   - `MODEL_AGENT_API_KEY`: API Key for Volcengine Ark service (used by `ArkLlm`)
  
@@ -171,8 +186,6 @@ PR0 does not yet support these Python-side capabilities:
 - `enableA2ui`
 - `enableTunnel`
 - YAML or dynamic tool discovery
-- `Runner.run(...)` convenience methods
-- `modelApiKey(...)` / typed Ark config through `Agent.builder()`
 
 ## FAQ
 - Error on startup `Missing required configuration: <ENV_NAME>`: indicates a required environment variable is not set; please complete it according to the prompt.

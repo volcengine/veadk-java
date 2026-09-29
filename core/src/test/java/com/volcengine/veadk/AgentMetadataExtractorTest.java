@@ -70,12 +70,18 @@ class AgentMetadataExtractorTest {
         assertThat(metadata.autoSaveSession()).isTrue();
         assertThat(metadata.tools())
                 .extracting(AgentMetadata.ToolMetadata::name)
-                .containsExactly("explicit_lookup", AgentMetadataExtractor.WEB_SEARCH_TOOL_NAME);
+                .containsExactly(
+                        "explicit_lookup",
+                        AgentMetadataExtractor.WEB_SEARCH_TOOL_NAME,
+                        AgentMetadataExtractor.KNOWLEDGEBASE_TOOL_NAME,
+                        AgentMetadataExtractor.MEMORY_TOOL_NAME);
         assertThat(metadata.tools())
                 .extracting(AgentMetadata.ToolMetadata::source)
                 .containsExactly(
                         AgentMetadataExtractor.TOOL_SOURCE_EXPLICIT,
-                        AgentMetadataExtractor.TOOL_SOURCE_EXPLICIT);
+                        AgentMetadataExtractor.TOOL_SOURCE_EXPLICIT,
+                        AgentMetadataExtractor.TOOL_SOURCE_AUTO,
+                        AgentMetadataExtractor.TOOL_SOURCE_AUTO);
         assertThat(metadata.subAgents()).hasSize(1);
         assertThat(metadata.subAgents().get(0).id()).isEqualTo("root_agent/child_agent");
         assertThat(component(metadata, "knowledgebase").enabled()).isTrue();

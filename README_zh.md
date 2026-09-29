@@ -28,8 +28,14 @@ Agent agent = Agent.builder()
     .description("回答用户问题。")
     .instruction("你是一个有帮助的助手。")
     .modelName("doubao-seed-2-1-pro-260628")
+    .modelApiKey(System.getenv("MODEL_AGENT_API_KEY"))
     .build();
 ```
+
+`modelName(...)` 会在 build 阶段创建默认 `ArkLlm`。可以通过
+`modelApiKey(...)` 显式传入 Ark API key；如果不传，则从环境变量
+`MODEL_AGENT_API_KEY` 读取。需要自定义 Ark endpoint 时可使用
+`modelApiBase(...)` / `modelBaseUrl(...)`。
 
 如果你希望自己控制模型配置，也可以直接传入 ADK `BaseLlm` 实例：
 
@@ -58,6 +64,14 @@ AgentMetadata metadata = AgentMetadataExtractor.extract(agent);
 System.out.println(metadata.tools());
 ```
 
+如果需要简单的阻塞式交互入口，可以使用 VeADK runner 便捷 API：
+
+```java
+import com.volcengine.veadk.runner.Runner;
+
+String answer = new Runner(agent).run("你好");
+```
+
 metadata 输出包含：
 
 - Agent 基础字段：`id`、`name`、`description`、`instructionSummary`、`modelName`、
@@ -73,7 +87,8 @@ metadata 输出包含：
   规范工具名是 `web_search`、`loadKnowledgebase`、`loadMemory`。
 
 ### 必需环境变量
-实例化或调用 `ArkLlm` 的示例在运行前需要配置以下环境变量（缺失时会抛出明确错误）：
+未显式传入 API key 时，实例化或调用 `ArkLlm` 的示例在运行前需要配置以下环境变量
+（缺失时会抛出明确错误）：
 
   - `MODEL_AGENT_API_KEY`：火山方舟服务的 API Key（`ArkLlm` 使用）
  
@@ -165,8 +180,6 @@ PR0 暂不支持以下 Python 侧能力：
 - `enableA2ui`
 - `enableTunnel`
 - YAML 或动态工具发现
-- `Runner.run(...)` 便捷方法
-- `Agent.builder()` 上的 `modelApiKey(...)` / 类型化 Ark config
 
 ## 常见问题
 - 启动时报错 `Missing required configuration: <ENV_NAME>`：表示必需环境变量未设置，请根据提示进行补全。
