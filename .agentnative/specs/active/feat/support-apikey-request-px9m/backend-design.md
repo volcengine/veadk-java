@@ -32,7 +32,19 @@ Memory：
 - wrapper 已定义现有 Viking 路径、请求体和返回解析，API Key 客户端应复用相同数据结构与解析语义。
 - 测试使用 JUnit 5、Mockito static/construction mock；Maven Surefire 与 JaCoCo 已配置。
 
-### 2.3 约束结论
+### 2.3 Memory API Key 协议证据
+
+本次返修针对 `BDR-P1-001` 以可复核的官方材料冻结协议，不再把协议正确性留给 E2E 猜测：
+
+- 官方鉴权文档 `https://docs.volcengine.com/docs/84313/1783389`：Memory 数据面支持 API Key，控制面只支持 AK/SK。
+- 官方 AddSession HTTP 文档 `https://docs.volcengine.com/docs/84313/1783353`：`POST /api/memory/session/add`，示例直接使用 `Authorization: Bearer <API_KEY>`，列明完整请求/响应字段。官方 SDK 文档 `https://docs.volcengine.com/docs/84313/1946661` 的 `collection.add_session(...)` 与其字段一致。
+- 官方 SearchMemory HTTP 文档 `https://docs.volcengine.com/docs/84313/1783351`：`POST /api/memory/search`，示例直接使用 `Authorization: Bearer <API_KEY>`，列明完整请求/响应字段。官方 SDK 文档 `https://docs.volcengine.com/docs/84313/1946665` 与其字段一致。
+- 官方 PyPI 发布包 `vikingdb-python-sdk==0.1.32`（wheel SHA-256 `7e58ba299b561bd53859cfb63a5e4af95088a3723378109548c2011390f90bfb`）：`auth.py` 写入 Bearer header；`memory/client.py` 固化 AddSession/SearchMemory 的 POST path 和 JSON headers；`memory/collection.py` 固化请求体；`_client.py`/`exceptions.py` 固化 HTTP、JSON、业务错误上下文与 `X-Tt-Logid`/body request ID 解析。
+- 官方 Maven Central `com.volcengine:vikingdb-java-sdk:0.1.17` 发布 JAR（SHA-256 `cc50c95b57df68c8e0095a305d55e7884dfd9480b67fa68e8a6ea133be6dee35`）含 `AuthWithApiKey`，但包目录仅有 `core`、`knowledge`、`vector`，没有 Memory service/model。它不能为本需求提供类型安全的 Memory add/search 调用；为只使用其中通用 transport 而新增依赖反而会带入 `volc-sdk-java`、Jackson、commons-lang3 等传递依赖。
+
+因此本轮不新增 SDK 依赖：Memory 使用仓库已有 Java 17 `HttpClient` 与 Jackson，严格实现下述官方 HTTP 契约。该选择不改变 public API、不增加包体和依赖冲突面；未来官方 Java SDK 发布 Memory API 时再单独评估迁移，不属于本需求。
+
+### 2.4 约束结论
 
 - 仅增加 Java 配置对象、数据面传输选择及对应测试/README；不引入新三方依赖。
 - API Key 值只能保存在内存配置/请求 header 中，禁止进入 `toString`、日志、异常或测试输出。
@@ -123,17 +135,39 @@ non-success/network/parse failure -> 抛出 VikingDataPlaneException
 
 构造流程与 KnowledgeBase 一致：API Key 模式不读取 AK/SK、不调用 `isCollectionExists`/`createCollection`；无 API Key 时保留现有检查和自动创建。
 
-数据面流程：
+数据面公共传输契约：
 
-- `addSessionToMemory` 保留现有 user 文本事件筛选；无有效消息仍直接完成且不发请求。存在消息时调用 API Key data client 的 `/api/memory/session/add` 或现有 AK/SK wrapper。
-- `searchMemory` 保留 collection、userId、query、topK 和 memory types，调用 `/api/memory/search` 或现有 wrapper。
-- Python Memory 通过 `VikingMem` 的 `APIKey` auth 和 `get_collection(collection_name, project_name)` 访问。Java 当前依赖中没有该 Memory SDK，因此采用等效 HTTP data client：`Authorization: Bearer <apiKey>`，请求体保留 `collection_name` 并新增 `project` 定位信息；真实 E2E 负责验证服务端兼容性。若开发前依赖树确认现有 `volc-sdk-java` 已暴露等效 APIKey auth，则优先直接复用，且不得新增依赖。
-- `addSession` 非成功必须抛异常，不能继续以 `false` 表示成功完成；`searchMemory` 非成功必须抛异常，只有成功响应中的空 `result_list` 返回空列表。
-- 当前 Java 无用户画像公开方法，本轮不新增；未来同一 backend 增加时复用同一 data client。
+- base URL 使用 §3.3/§3.4 的已校验配置，path 只允许下表两个常量；method 均为 `POST`。
+- headers 固定为 `Authorization: Bearer <apiKey>`、`Accept: application/json`、`Content-Type: application/json`；API Key 只进入 header，不进入 body、URI、日志或异常。
+- JSON UTF-8 编解码；连接和单请求超时均为 5 秒；不自动重试。测试 transport 必须可注入，以捕获 method/path/header/body 而不访问网络。
+
+官方 AddSession request schema 为：定位字段 `collection_name?: string`、`project_name?: string` 或 `resource_id?: string`；`session_id?: string`（1–128 位英文字母/数字/下划线）；`messages: object[]`（最多 1000 条），元素包含 `role: user|assistant|system`、`content: string|object[]` 以及可选 `role_id`、`role_name`、`time`；`metadata: object` 包含必填 `default_user_id`、`default_assistant_id`、`time` 和可选名称、`group_id`、`custom_fields`；另有可选 `store_file`、`extract_memory_type`、`profiles[{profile_type,profile_scope[]}]`、`ttl_absolute`、`ttl_relative`。response schema 为 `code: integer`、`message: string`、`data.session_id: string`、`request_id: string`。同一 `session_id` 会覆盖该会话之前生成的事件版本并撤回相关画像，因此客户端不得自动重试。
+
+官方 SearchMemory request schema 为：定位字段 `collection_name?: string`、`project_name?: string` 或 `resource_id?: string`；`query?: string`（最长 4000 字符）；`filter: object`，包含可选 `user_id`、`assistant_id`、`primary_key`、`start_time`、`end_time`、`group_id`、`session_id` 与必填 `memory_type`，其中 ID/memory type 字段支持单值或数组；`limit?: integer`（默认 10，范围 1–5000）。检索事件/画像时 `user_id` 与 `assistant_id` 至少一个。response schema 为 `code: integer`、`message: string`、`data{collection_name,count,result_list[],token_usage}`、`request_id: string`；`result_list[]` 的完整字段见下表。
+
+| Operation | Path | 请求体 | 成功响应中本 SDK 使用的字段 |
+| --- | --- | --- | --- |
+| AddSession | `/api/memory/session/add` | 本 SDK 固定发送 `collection_name`、`project_name`、`session_id`、`messages[]`；每个 message 保留当前 Java 模型的 `role`、`content`；发送 `metadata.default_user_id`、`metadata.default_assistant_id`、`metadata.time`。当前公开方法不产生 `profiles`、`store_file`、`resource_id`、`extract_memory_type`、TTL 字段，因此不发送这些可选字段。 | `code`、`message`、`data.session_id`、`request_id`；仅在 `code == 0` 且 `data.session_id` 为非空字符串时完成。 |
+| SearchMemory | `/api/memory/search` | 必填 `collection_name`、`project_name`、`query`、`filter`、`limit`；`filter.user_id` 为调用入参，`filter.memory_type` 为解析后的配置列表。当前 config 未暴露 `resource_id`，因此使用 collection+project 定位；不发送未由当前 public API 提供的 `assistant_id`、`primary_key`、时间、group/session filter。 | `code`、`message`、`data.collection_name`、`data.count`、`data.result_list[]`、`data.token_usage`、`request_id`。每项协议字段为 `id`、`score`、`memory_type`、`user_id[]`、`assistant_id[]`、`session_id`、`group_id`、`time`、`status`、`labels`、`memory_info`；为保持现有返回契约，本 SDK 仅把 `memory_info.summary` 非空项映射为 `MemoryEntry`，成功且列表缺失/为空返回空列表。 |
+
+流程约束：
+
+- `addSessionToMemory` 保留现有 user 文本事件筛选；无有效消息仍直接完成且不发请求。`session_id` 取 `Session.id()`，collection 取方法当前使用的 `session.appName()`，project 取 config；不得省略 session ID 后由服务端生成，以免丢失调用侧会话关联。官方文档提示仅 user 消息不会形成 assistant 关联，这是既有筛选行为的已知兼容限制，本需求不改变消息选择语义。
+- `searchMemory` 保留 appName/userId/query/topK/memory types 的现有语义，collection 取方法入参 appName，project 取 config。
+- API Key client 不复用 `com.volcengine:vikingdb-java-sdk`：已核验的 `0.1.17` 没有 Memory API；也不新增其它依赖。
+- 当前 Java 无用户画像公开方法，本轮不新增。
+
+响应与错误判定：
+
+1. HTTP status 必须为 200；非 200 为传输/服务错误，即使 body 可解析也抛 `VikingDataPlaneException`。
+2. HTTP 200 body 必须是 JSON object，且 `code` 必须存在并等于整数 `0`；缺失、类型错误或非 0 均为协议/业务错误。非 0 时保留非敏感 `code` 和 `message` 摘要，但不保存完整 body。
+3. AddSession 的 `data.session_id` 缺失/空值属于成功响应契约破坏；SearchMemory 的 `data.result_list` 缺失/null 按现有兼容语义视为空列表，非 array 则为协议错误。
+4. request ID 提取优先级固定为：JSON body 顶层 `request_id` → 旧错误体 `ResponseMetadata.RequestId` → response header `X-Tt-Logid`（大小写不敏感）→ `unknown`。body 字段来自两份官方响应 schema，header 名来自官方 Python SDK `_client.py` 的 `_REQUEST_ID_HEADER`；这也对齐官方 SDK“可解析 body 中的 request ID 优先于传入 header fallback”的行为。此规则对 HTTP、业务码、JSON 解析失败统一生效。
+5. 网络/超时/JSON 解析错误均抛安全异常；API Key 模式不得回退 AK/SK。
 
 ### 4.4 异常契约
 
-新增 `VikingDataPlaneException`（runtime exception），只携带 operation、非敏感服务端 code、request ID、HTTP/status 与 cause。消息不得包含 API Key、Authorization、AK/SK、session token、完整请求 header 或完整响应体。
+新增 `VikingDataPlaneException`（runtime exception），只携带 operation、非敏感服务端 code、request ID、HTTP status 与 cause；Memory 按 §4.3 的固定优先级提取 request ID。消息不得包含 API Key、Authorization、AK/SK、session token、完整请求 header、请求 body 或完整响应 body。服务端 `message` 如需保留只能作为有长度上限的摘要，且在写入异常前排除凭据值。
 
 对现有 AK/SK 数据面 wrapper 同步修正失败分支：非成功响应和解析异常抛 `VikingDataPlaneException`，不再返回正常空结果；成功且结果数组缺失/为空仍返回空列表。管理方法的 boolean 兼容语义保持不变。Memory service 不重复记录并包装同一异常；最近的 integration 层完成一次固定消息日志或直接向上透传。
 
@@ -170,7 +204,7 @@ non-success/network/parse failure -> 抛出 VikingDataPlaneException
 - `[NEW] core/src/main/java/com/volcengine/veadk/memory/viking/VikingMemoryConfig.java`：Memory 配置与解析。
 - `[MODIFY] core/src/main/java/com/volcengine/veadk/memory/viking/VikingMemoryService.java`：显式配置、初始化边界、data client 选择。
 - `[MODIFY] core/src/main/java/com/volcengine/veadk/integration/vikingmemory/VikingMemoryWrapper.java`：AK/SK 数据面失败语义。
-- `[NEW] core/src/main/java/com/volcengine/veadk/integration/vikingmemory/VikingMemoryApiKeyClient.java`：API Key add/search。
+- `[NEW] core/src/main/java/com/volcengine/veadk/integration/vikingmemory/VikingMemoryApiKeyClient.java`：以 Java 17 `HttpClient` + 现有 Jackson 实现 §4.3 已冻结的 API Key add/search，不新增依赖。
 - `[NEW] core/src/main/java/com/volcengine/veadk/integration/viking/VikingDataPlaneException.java`：安全的统一数据面异常。
 - `[MODIFY] README.md`、`README_zh.md`：配置入口、变量、优先级、数据/管理边界、兼容与占位示例。
 
@@ -183,7 +217,7 @@ non-success/network/parse failure -> 抛出 VikingDataPlaneException
 - `[MODIFY] KnowledgeBaseTest`、`VikingKnowledgebaseBackendTest`：显式 config 透传、API Key 跳过预检、AK/SK 兼容、管理缺凭据。
 - `[MODIFY] VikingMemoryServiceTest`：API Key-only 初始化、add/search 选择、消息过滤、AK/SK 兼容。
 - `[MODIFY] 两个 wrapper test`：非成功/解析失败抛异常，成功空结果仍为空。
-- `[NEW] 两个 API Key client test`：使用注入式 fake transport 捕获 method/path/body/header；断言 Bearer、project/collection 和响应解析，同时确保失败异常/日志不含唯一假 Secret。
+- `[NEW] 两个 API Key client test`：使用注入式 fake transport 捕获 method/path/body/header；Memory 逐项断言 §4.3 的 add/search 字段、`code == 0`、session ID、result mapping、body/header request ID 优先级，同时确保失败异常/日志不含唯一假 Secret。
 
 ## 8. 验证计划
 
@@ -210,6 +244,8 @@ non-success/network/parse failure -> 抛出 VikingDataPlaneException
 - 空 query/空有效消息不发请求；成功空结果与所有失败可区分。
 - topK、filter、rerank、chunk diffusion、memory types 和返回映射不变。
 - 假 Secret 不出现在异常 message/cause 可见文本及捕获日志。
+- Memory AddSession/SearchMemory 对 method、path、headers、完整本轮字段集做结构断言；分别覆盖 HTTP 非 200、业务 `code != 0`、code 缺失/类型错误、非 JSON、AddSession session ID 缺失、SearchMemory 空/畸形 result list。
+- request ID 覆盖顶层 body 优先、旧 `ResponseMetadata.RequestId` 兼容、`X-Tt-Logid` fallback 和完全缺失为 `unknown`。
 
 开发节点使用 JaCoCo XML 对本次新增/修改可测行统计增量覆盖率，目标 `> 90%`；报告 `core/target/site/jacoco/jacoco.xml`，逐文件列出分子/分母与未覆盖行。
 
@@ -225,7 +261,7 @@ non-success/network/parse failure -> 抛出 VikingDataPlaneException
 
 | 风险 | 控制 |
 | --- | --- |
-| API Key endpoint/header 与服务端实际契约偏差 | 请求构造集中化，fake transport 单测 + 真实 E2E；不静默 fallback |
+| API Key endpoint/header 或字段漂移 | §2.3 官方文档与发布 SDK 双源冻结，常量化构造并用 fake transport 逐字段测试；真实 E2E 仅作为服务可用性验收，不承担补协议 |
 | 构造阶段仍误触管理调用 | 对 EnvUtil 和 management wrapper 做零交互断言 |
 | 失败继续伪装空结果 | wrapper/client 的非成功、网络、解析异常均做拒绝测试 |
 | Secret 经异常或日志泄漏 | 唯一假 Secret 覆盖各失败路径并检索输出 |
@@ -248,4 +284,4 @@ non-success/network/parse failure -> 抛出 VikingDataPlaneException
 
 ## 11. 待确认项
 
-无阻塞性产品待确认项。KnowledgeBase API Key 请求字段和 BytePlus endpoint 已依据冻结 Python revision `31d2c67be6fb9bd7f3139de42d2615c2c4a73e6f` 固化。Memory 使用等效 HTTP 鉴权是 Java 当前无 Viking Memory SDK 依赖下的最小方案，须由真实 E2E 验证；若验证表明服务端不接受该等效方式且必须新增依赖或改变公开契约，应停止开发并回到 BACKEND_DESIGN 处理范围变化。
+无阻塞性产品待确认项。KnowledgeBase API Key 请求字段和 BytePlus endpoint 已依据冻结 Python revision `31d2c67be6fb9bd7f3139de42d2615c2c4a73e6f` 固化。Memory 的 Bearer HTTP 契约已由 §2.3 的官方 HTTP 文档、官方 SDK 文档和官方 PyPI SDK 源码交叉冻结；官方 Java SDK `0.1.17` 没有 Memory API，因此明确不新增该依赖。若开发期间官方协议或 SDK 出现与本冻结证据冲突的新事实，应停止并回到 BACKEND_DESIGN，而不是在开发节点猜测或扩大范围。

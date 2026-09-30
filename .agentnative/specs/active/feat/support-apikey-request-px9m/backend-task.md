@@ -47,11 +47,15 @@
 ### T5：实现 Memory 数据面 API Key 路径
 
 - 来源：设计 §4.1、§4.3、§4.4。
-- 增加可注入 transport 的 Memory API Key client，实现 session add 与 search。
+- 不新增依赖；使用 Java 17 `HttpClient`、现有 Jackson 和可注入 transport 实现官方 Memory HTTP 契约。不得使用 `com.volcengine:vikingdb-java-sdk` 的通用 API Key transport 代替 Memory SDK：已核验 `0.1.17` 发布 JAR 不含 Memory service/model。
+- AddSession 固定 `POST /api/memory/session/add`；headers 为 Bearer、JSON Accept/Content-Type；body 精确包含 `collection_name`、`project_name`、`session_id`、`messages[{role,content}]`、`metadata{default_user_id,default_assistant_id,time}`，不发送当前 public API 无来源的可选字段。
+- SearchMemory 固定 `POST /api/memory/search`；使用相同 headers；body 精确包含 `collection_name`、`project_name`、`query`、`filter{user_id,memory_type}`、`limit`。保持 `memory_info.summary` 到 `MemoryEntry` 的现有映射。
 - Service 按配置选择 data client；API Key-only 不读 AK/SK、不检查/创建 collection；API Key + 完整管理凭据时按现有行为执行管理预检。
-- 保留消息筛选、metadata、topK、memory types 和返回映射；非成功/网络/解析失败抛安全异常。
-- 测试 API Key-only、环境回退、双凭据分流、AK/SK fallback、无消息短路、成功空结果、失败不 fallback。
-- 完成条件：REQ-002、REQ-004 的 Memory 部分和 AC-003/004/006-011 可由单测追溯。
+- 成功必须同时满足 HTTP 200、JSON object、整数 `code == 0`；AddSession 还要求非空 `data.session_id`。HTTP 非 200、业务码非 0、code 缺失/类型错误、JSON/结构错误、网络/超时均抛安全异常；SearchMemory 仅对成功响应中缺失/null/空 `result_list` 返回空列表。
+- request ID 按顶层 `request_id` → 旧错误体 `ResponseMetadata.RequestId` → response header `X-Tt-Logid` → `unknown` 提取；异常不得包含 API Key、Authorization、请求 body/header 或完整响应。
+- 测试 API Key-only、环境回退、双凭据分流、AK/SK fallback、无消息短路、成功空结果、失败不 fallback；fake transport 逐项断言两接口的 method/path/header/body 和不发送字段。
+- 拒绝测试覆盖 HTTP 非 200、业务 `code != 0`、code 缺失/类型错误、非 JSON、AddSession session ID 缺失、SearchMemory result list 类型错误，以及四种 request ID 来源/缺失分支；用唯一假 Secret 验证异常与日志脱敏。
+- 完成条件：REQ-002、REQ-004 的 Memory 部分和 AC-003/004/006-011 可由单测追溯；Coding Agent 无需再猜测 Memory method、path、字段、成功/错误或 request ID 规则。
 
 ### T6：统一数据面异常与凭据安全验证
 
