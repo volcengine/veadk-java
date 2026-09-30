@@ -102,6 +102,29 @@ import com.volcengine.veadk.Runner;
 String answer = new Runner(agent).run("Hello");
 ```
 
+Short-term memory is session-scoped context. Configure it on the agent, then
+reuse the same `userId` and `sessionId` when running follow-up turns:
+
+```java
+import com.volcengine.veadk.Agent;
+import com.volcengine.veadk.Runner;
+import com.volcengine.veadk.memory.ShortTermMemory;
+
+ShortTermMemory shortTermMemory = ShortTermMemory.builder().local().build();
+
+Agent agent = Agent.builder()
+    .name("memory_agent")
+    .instruction("Remember what the user tells you.")
+    .modelName("doubao-seed-2-1-pro-260628")
+    .shortTermMemory(shortTermMemory)
+    .build();
+
+Runner runner = new Runner(agent, "memory_demo");
+
+runner.run("user_1", "session_1", "My name is Ming.");
+runner.run("user_1", "session_1", "What is my name?");
+```
+
 The extracted metadata includes:
 
 - Basic agent fields: `id`, `name`, `description`, `instructionSummary`, `modelName`,

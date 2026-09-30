@@ -30,6 +30,7 @@ import com.google.genai.types.GenerateContentConfig;
 import com.google.genai.types.Schema;
 import com.volcengine.veadk.knowledgebase.BaseKnowledgebaseService;
 import com.volcengine.veadk.memory.SaveSessionToMemoryCallback;
+import com.volcengine.veadk.memory.ShortTermMemory;
 import com.volcengine.veadk.model.ArkLlm;
 import com.volcengine.veadk.model.ArkLlmConfig;
 import com.volcengine.veadk.model.ModelProvider;
@@ -55,6 +56,7 @@ public final class Agent extends LlmAgent {
     public static final String AUTO_TOOL_SOURCE_METADATA_KEY = "veadk.autoToolSource";
 
     private final BaseMemoryService longTermMemoryService;
+    private final ShortTermMemory shortTermMemory;
     private final BaseKnowledgebaseService knowledgebaseService;
     private final boolean autoSaveSession;
     private final String veadkModelName;
@@ -63,6 +65,7 @@ public final class Agent extends LlmAgent {
     private Agent(Builder builder) {
         super(builder);
         this.longTermMemoryService = builder.longTermMemoryService;
+        this.shortTermMemory = builder.shortTermMemory;
         this.knowledgebaseService = builder.knowledgebaseService;
         this.autoSaveSession = builder.autoSaveSession;
         this.veadkModelName = Objects.requireNonNullElse(builder.veadkModelName, "");
@@ -75,6 +78,10 @@ public final class Agent extends LlmAgent {
 
     public Optional<BaseMemoryService> longTermMemoryService() {
         return Optional.ofNullable(longTermMemoryService);
+    }
+
+    public Optional<ShortTermMemory> shortTermMemory() {
+        return Optional.ofNullable(shortTermMemory);
     }
 
     public Optional<BaseKnowledgebaseService> knowledgebaseService() {
@@ -97,6 +104,7 @@ public final class Agent extends LlmAgent {
     public static final class Builder extends LlmAgent.Builder {
 
         private BaseMemoryService longTermMemoryService;
+        private ShortTermMemory shortTermMemory;
         private BaseKnowledgebaseService knowledgebaseService;
         private boolean autoSaveSession;
         private String veadkModelName = "";
@@ -139,6 +147,12 @@ public final class Agent extends LlmAgent {
 
         public Builder longTermMemory(BaseMemoryService service) {
             this.longTermMemoryService = Objects.requireNonNull(service, "service must be set.");
+            return this;
+        }
+
+        public Builder shortTermMemory(ShortTermMemory shortTermMemory) {
+            this.shortTermMemory =
+                    Objects.requireNonNull(shortTermMemory, "shortTermMemory must be set.");
             return this;
         }
 
@@ -616,6 +630,7 @@ public final class Agent extends LlmAgent {
                     autoToolNames,
                     knowledgebaseService != null,
                     longTermMemoryService != null,
+                    shortTermMemory != null,
                     autoSaveSession);
         }
 

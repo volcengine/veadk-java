@@ -28,11 +28,14 @@ import com.google.adk.models.BaseLlm;
 import com.google.adk.models.BaseLlmConnection;
 import com.google.adk.models.LlmRequest;
 import com.google.adk.models.LlmResponse;
+import com.google.adk.sessions.InMemorySessionService;
 import com.google.genai.types.Content;
 import com.google.genai.types.Part;
+import com.volcengine.veadk.memory.ShortTermMemory;
 import io.reactivex.rxjava3.core.Flowable;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
 class RunnerTest {
@@ -120,9 +123,32 @@ class RunnerTest {
         EventAgent agent = new EventAgent("runner_agent", textEvent("runner_agent", "unused"));
         Runner runner = new Runner(agent);
 
-        assertThatThrownBy(() -> runner.run("user-1", "missing-session", "hello"))
+        assertThatThrownBy(
+                        () ->
+                                runner.run(
+                                        "user-1",
+                                        "missing-session",
+                                        "hello",
+                                        RunConfig.builder().autoCreateSession(false).build()))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("Session not found: missing-session for user user-1");
+    }
+
+    @Test
+    void runWithExplicitSessionIdAutoCreatesByDefault() {
+        EventAgent agent = new EventAgent("runner_agent", textEvent("runner_agent", "ok"));
+        Runner runner = new Runner(agent);
+
+        String answer = runner.run("user-1", "session-1", "hello");
+
+        assertThat(answer).isEqualTo("ok");
+        assertThat(
+                        runner.sessionService()
+                                .getSession(
+                                        runner.appName(), "user-1", "session-1", Optional.empty())
+                                .blockingGet()
+                                .id())
+                .isEqualTo("session-1");
     }
 
     @Test
@@ -161,6 +187,105 @@ class RunnerTest {
         Runner runner = new Runner(agent);
 
         assertThat(runner.memoryService()).isSameAs(memoryService);
+    }
+
+    @Test
+    void constructorUsesDefaultShortTermMemoryWhenNoneConfigured() {
+        EventAgent agent = new EventAgent("runner_agent", textEvent("runner_agent", "ok"));
+
+        Runner runner = new Runner(agent);
+
+        assertThat(runner.shortTermMemory().backend()).isEqualTo(ShortTermMemory.Backend.LOCAL);
+        assertThat(runner.sessionService()).isInstanceOf(InMemorySessionService.class);
+    }
+
+    @Test
+    void constructorReadsShortTermMemoryFromVeadkAgent() {
+        ShortTermMemory shortTermMemory = ShortTermMemory.local();
+        Agent agent =
+                Agent.builder()
+                        .name("short_memory_agent")
+                        .model(new TestLlm("test-model"))
+                        .shortTermMemory(shortTermMemory)
+                        .build();
+
+        Runner runner = new Runner(agent);
+
+        assertThat(runner.shortTermMemory()).isSameAs(shortTermMemory);
+        assertThat(runner.sessionService()).isSameAs(shortTermMemory.sessionService());
+    }
+
+    @Test
+    void explicitShortTermMemoryTakesPrecedenceOverAgentMemory() {
+        ShortTermMemory agentMemory = ShortTermMemory.local();
+        ShortTermMemory explicitMemory = ShortTermMemory.local();
+        Agent agent =
+                Agent.builder()
+                        .name("short_memory_agent")
+                        .model(new TestLlm("test-model"))
+                        .shortTermMemory(agentMemory)
+                        .build();
+
+        Runner runner = new Runner(agent, "memory_app", explicitMemory);
+
+        assertThat(runner.shortTermMemory()).isSameAs(explicitMemory);
+        assertThat(runner.sessionService()).isSameAs(explicitMemory.sessionService());
+    }
+
+    @Test
+    void runWithShortTermMemoryTriggersCreateAndLoadCallbacks() {
+        AtomicInteger createCount = new AtomicInteger();
+        AtomicInteger loadCount = new AtomicInteger();
+        ShortTermMemory shortTermMemory =
+                ShortTermMemory.builder()
+                        .afterCreateSessionCallback(session -> createCount.incrementAndGet())
+                        .afterLoadMemoryCallback(session -> loadCount.incrementAndGet())
+                        .build();
+        EventAgent agent = new EventAgent("runner_agent", textEvent("runner_agent", "ok"));
+        Runner runner = new Runner(agent, "memory_app", shortTermMemory);
+        RunConfig autoCreateSession = RunConfig.builder().autoCreateSession(true).build();
+
+        runner.run("user-1", "session-1", "first", autoCreateSession);
+        runner.run("user-1", "session-1", "second", autoCreateSession);
+
+        assertThat(createCount).hasValue(1);
+        assertThat(loadCount).hasValue(1);
+        assertThat(
+                        shortTermMemory
+                                .sessionService()
+                                .listSessions("memory_app", "user-1")
+                                .blockingGet()
+                                .sessions())
+                .hasSize(1);
+    }
+
+    @Test
+    void autoCreateSessionFalseDoesNotCreateMissingShortTermSession() {
+        AtomicInteger createCount = new AtomicInteger();
+        ShortTermMemory shortTermMemory =
+                ShortTermMemory.builder()
+                        .afterCreateSessionCallback(session -> createCount.incrementAndGet())
+                        .build();
+        EventAgent agent = new EventAgent("runner_agent", textEvent("runner_agent", "unused"));
+        Runner runner = new Runner(agent, "memory_app", shortTermMemory);
+
+        assertThatThrownBy(
+                        () ->
+                                runner.run(
+                                        "user-1",
+                                        "missing-session",
+                                        "hello",
+                                        RunConfig.builder().autoCreateSession(false).build()))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Session not found: missing-session for user user-1");
+        assertThat(createCount).hasValue(0);
+        assertThat(
+                        shortTermMemory
+                                .sessionService()
+                                .listSessions("memory_app", "user-1")
+                                .blockingGet()
+                                .sessions())
+                .isEmpty();
     }
 
     private static Event textEvent(String author, String text) {

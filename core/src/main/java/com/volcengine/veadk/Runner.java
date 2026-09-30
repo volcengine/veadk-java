@@ -21,14 +21,14 @@ import com.google.adk.artifacts.InMemoryArtifactService;
 import com.google.adk.events.Event;
 import com.google.adk.memory.BaseMemoryService;
 import com.google.adk.memory.InMemoryMemoryService;
-import com.google.adk.sessions.InMemorySessionService;
+import com.google.adk.sessions.BaseSessionService;
 import com.google.adk.sessions.Session;
 import com.google.common.collect.ImmutableList;
 import com.google.genai.types.Content;
 import com.google.genai.types.Part;
+import com.volcengine.veadk.memory.ShortTermMemory;
 import io.reactivex.rxjava3.core.Single;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.stream.Collectors;
 
@@ -36,12 +36,22 @@ public class Runner extends com.google.adk.runner.Runner {
 
     public static final String DEFAULT_USER_ID = "default_user";
 
+    private final ShortTermMemory shortTermMemory;
+
     public Runner(BaseAgent agent) {
         this(agent, agent.name());
     }
 
     public Runner(BaseAgent agent, String appName) {
-        this(agent, appName, memoryServiceFrom(agent));
+        this(agent, appName, (ShortTermMemory) null, memoryServiceFrom(agent));
+    }
+
+    public Runner(BaseAgent agent, ShortTermMemory shortTermMemory) {
+        this(agent, agent.name(), shortTermMemory, memoryServiceFrom(agent));
+    }
+
+    public Runner(BaseAgent agent, String appName, ShortTermMemory shortTermMemory) {
+        this(agent, appName, shortTermMemory, memoryServiceFrom(agent));
     }
 
     public Runner(BaseAgent agent, BaseMemoryService baseMemoryService) {
@@ -50,6 +60,35 @@ public class Runner extends com.google.adk.runner.Runner {
 
     @SuppressWarnings("deprecation")
     public Runner(BaseAgent agent, String appName, BaseMemoryService baseMemoryService) {
+        this(agent, appName, (ShortTermMemory) null, baseMemoryService);
+    }
+
+    public Runner(
+            BaseAgent agent,
+            String appName,
+            ShortTermMemory shortTermMemory,
+            BaseMemoryService baseMemoryService) {
+        this(agent, appName, resolveServices(agent, shortTermMemory, baseMemoryService));
+    }
+
+    public Runner(
+            BaseAgent agent,
+            String appName,
+            BaseSessionService sessionService,
+            BaseMemoryService baseMemoryService) {
+        this(
+                agent,
+                appName,
+                ShortTermMemory.builder()
+                        .sessionService(
+                                Objects.requireNonNull(
+                                        sessionService, "sessionService must be set."))
+                        .build(),
+                baseMemoryService);
+    }
+
+    @SuppressWarnings("deprecation")
+    private Runner(BaseAgent agent, String appName, ResolvedServices services) {
         // ADK prefers Runner.builder() for direct construction, but Java subclass constructors
         // must call a superclass constructor. Keep inheritance to preserve ADK Runner
         // compatibility.
@@ -57,9 +96,14 @@ public class Runner extends com.google.adk.runner.Runner {
                 agent,
                 appName,
                 new InMemoryArtifactService(),
-                new InMemorySessionService(),
-                resolveMemoryService(agent, baseMemoryService),
+                services.shortTermMemory().sessionService(),
+                services.memoryService(),
                 ImmutableList.of());
+        this.shortTermMemory = services.shortTermMemory();
+    }
+
+    public ShortTermMemory shortTermMemory() {
+        return shortTermMemory;
     }
 
     public String run(String message) {
@@ -99,29 +143,24 @@ public class Runner extends com.google.adk.runner.Runner {
 
     private Session resolveSession(String userId, String sessionId, RunConfig runConfig) {
         if (!hasText(sessionId)) {
-            return sessionService().createSession(appName(), userId, Map.of(), null).blockingGet();
+            return shortTermMemory.createSession(appName(), userId, null).blockingGet();
         }
-        return sessionService()
-                .getSession(appName(), userId, sessionId, java.util.Optional.empty())
+        if (runConfig.autoCreateSession()) {
+            return shortTermMemory.createSession(appName(), userId, sessionId).blockingGet();
+        }
+        return shortTermMemory
+                .getSession(appName(), userId, sessionId)
                 .switchIfEmpty(
-                        Single.defer(
-                                () -> {
-                                    if (runConfig.autoCreateSession()) {
-                                        return sessionService()
-                                                .createSession(
-                                                        appName(), userId, Map.of(), sessionId);
-                                    }
-                                    return Single.error(
-                                            new IllegalArgumentException(
-                                                    String.format(
-                                                            "Session not found: %s for user %s",
-                                                            sessionId, userId)));
-                                }))
+                        Single.error(
+                                new IllegalArgumentException(
+                                        String.format(
+                                                "Session not found: %s for user %s",
+                                                sessionId, userId))))
                 .blockingGet();
     }
 
     private static RunConfig defaultRunConfig() {
-        return RunConfig.builder().build();
+        return RunConfig.builder().autoCreateSession(true).build();
     }
 
     private static Content contentFromText(String message) {
@@ -144,6 +183,27 @@ public class Runner extends com.google.adk.runner.Runner {
         }
         return null;
     }
+
+    private static ShortTermMemory resolveShortTermMemory(
+            BaseAgent agent, ShortTermMemory shortTermMemory) {
+        if (shortTermMemory != null) {
+            return shortTermMemory;
+        }
+        if (agent instanceof Agent veadkAgent) {
+            return veadkAgent.shortTermMemory().orElseGet(ShortTermMemory::local);
+        }
+        return ShortTermMemory.local();
+    }
+
+    private static ResolvedServices resolveServices(
+            BaseAgent agent, ShortTermMemory shortTermMemory, BaseMemoryService baseMemoryService) {
+        return new ResolvedServices(
+                resolveShortTermMemory(agent, shortTermMemory),
+                resolveMemoryService(agent, baseMemoryService));
+    }
+
+    private record ResolvedServices(
+            ShortTermMemory shortTermMemory, BaseMemoryService memoryService) {}
 
     private static String extractResponseText(
             List<Event> events, String appName, String userId, String sessionId) {

@@ -98,6 +98,29 @@ import com.volcengine.veadk.Runner;
 String answer = new Runner(agent).run("你好");
 ```
 
+短期记忆表示会话级上下文。把它配置在 Agent 上，并在追问时复用同一个
+`userId` 和 `sessionId`：
+
+```java
+import com.volcengine.veadk.Agent;
+import com.volcengine.veadk.Runner;
+import com.volcengine.veadk.memory.ShortTermMemory;
+
+ShortTermMemory shortTermMemory = ShortTermMemory.builder().local().build();
+
+Agent agent = Agent.builder()
+    .name("memory_agent")
+    .instruction("Remember what the user tells you.")
+    .modelName("doubao-seed-2-1-pro-260628")
+    .shortTermMemory(shortTermMemory)
+    .build();
+
+Runner runner = new Runner(agent, "memory_demo");
+
+runner.run("user_1", "session_1", "我叫小明。");
+runner.run("user_1", "session_1", "我叫什么？");
+```
+
 metadata 输出包含：
 
 - Agent 基础字段：`id`、`name`、`description`、`instructionSummary`、`modelName`、

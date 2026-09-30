@@ -33,6 +33,7 @@ import com.volcengine.veadk.knowledgebase.BaseKnowledgebaseService;
 import com.volcengine.veadk.knowledgebase.KnowledgebaseEntry;
 import com.volcengine.veadk.knowledgebase.SearchKnowledgebaseResponse;
 import com.volcengine.veadk.memory.SaveSessionToMemoryCallback;
+import com.volcengine.veadk.memory.ShortTermMemory;
 import com.volcengine.veadk.model.ArkLlm;
 import com.volcengine.veadk.model.ModelProvider;
 import com.volcengine.veadk.model.OpenAiCompatibleLlm;
@@ -319,6 +320,22 @@ class AgentTest {
                 .containsEntry(Agent.AUTO_TOOL_METADATA_KEY, true)
                 .containsEntry(Agent.AUTO_TOOL_SOURCE_METADATA_KEY, "memory");
         assertThat(agent.metadataSnapshot().autoToolNames()).containsExactly("loadMemory");
+    }
+
+    @Test
+    void shortTermMemoryIsStoredAndDoesNotInjectTool() {
+        ShortTermMemory shortTermMemory = ShortTermMemory.local();
+
+        Agent agent =
+                Agent.builder()
+                        .name("short_memory_agent")
+                        .model(new TestLlm("short-memory-model"))
+                        .shortTermMemory(shortTermMemory)
+                        .build();
+
+        assertThat(agent.shortTermMemory()).containsSame(shortTermMemory);
+        assertThat(agent.metadataSnapshot().hasShortTermMemory()).isTrue();
+        assertThat(agent.metadataSnapshot().autoToolNames()).isEmpty();
     }
 
     @Test
