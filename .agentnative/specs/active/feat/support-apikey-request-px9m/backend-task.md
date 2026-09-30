@@ -48,12 +48,15 @@
 
 - 来源：设计 §4.1、§4.3、§4.4。
 - 不新增依赖；使用 Java 17 `HttpClient`、现有 Jackson 和可注入 transport 实现官方 Memory HTTP 契约。不得使用 `com.volcengine:vikingdb-java-sdk` 的通用 API Key transport 代替 Memory SDK：已核验 `0.1.17` 发布 JAR 不含 Memory service/model。
-- AddSession 固定 `POST /api/memory/session/add`；headers 为 Bearer、JSON Accept/Content-Type；body 精确包含 `collection_name`、`project_name`、`session_id`、`messages[{role,content}]`、`metadata{default_user_id,default_assistant_id,time}`，不发送当前 public API 无来源的可选字段。
+- AddSession 固定 `POST /api/memory/session/add`；headers 为 Bearer、JSON Accept/Content-Type；body 精确包含 `collection_name`、`project_name`、`messages[{role,content}]`、`metadata{default_user_id,default_assistant_id,time}`，并按下一条规则发送或省略 `session_id`；不发送当前 public API 无来源的其它可选字段。
+- 在存在有效 user text 消息时按设计 §4.3 映射必填值：collection 取非空 `Session.appName()` 并保持现有“调用侧 Session 决定 collection”行为；user 取非空 `Session.userId()`；assistant 沿用固定 `assistant`；time 从生产默认 `System::currentTimeMillis` 的可注入 package-private `LongSupplier` 只取一次并要求正数。collection/userId 缺失或非正时间均在发请求前拒绝。无有效消息继续优先短路，不触发上述校验。
+- session ID 取 `Session.id()`：匹配 `^[A-Za-z][A-Za-z0-9_]{0,127}$` 时原样发送；null/blank 时省略并由服务端生成，以兼容当前 AK/SK 实现不发送该字段的行为；其它非空值确定性映射为 `s_` 加 UTF-8 SHA-256 的 64 位小写十六进制，不记录原值。只对 API Key client 增加该字段，既有 AK/SK wrapper 保持不变。
 - SearchMemory 固定 `POST /api/memory/search`；使用相同 headers；body 精确包含 `collection_name`、`project_name`、`query`、`filter{user_id,memory_type}`、`limit`。保持 `memory_info.summary` 到 `MemoryEntry` 的现有映射。
 - Service 按配置选择 data client；API Key-only 不读 AK/SK、不检查/创建 collection；API Key + 完整管理凭据时按现有行为执行管理预检。
 - 成功必须同时满足 HTTP 200、JSON object、整数 `code == 0`；AddSession 还要求非空 `data.session_id`。HTTP 非 200、业务码非 0、code 缺失/类型错误、JSON/结构错误、网络/超时均抛安全异常；SearchMemory 仅对成功响应中缺失/null/空 `result_list` 返回空列表。
 - request ID 按顶层 `request_id` → 旧错误体 `ResponseMetadata.RequestId` → response header `X-Tt-Logid` → `unknown` 提取；异常不得包含 API Key、Authorization、请求 body/header 或完整响应。
-- 测试 API Key-only、环境回退、双凭据分流、AK/SK fallback、无消息短路、成功空结果、失败不 fallback；fake transport 逐项断言两接口的 method/path/header/body 和不发送字段。
+- 测试 API Key-only、环境回退、双凭据分流、AK/SK fallback、无消息短路、成功空结果、失败不 fallback；fake transport 逐项断言两接口的 method/path/header/body 和不发送字段。AddSession 正常用例断言 user/assistant/time 的具体来源及只取一次时间。
+- AddSession 边界测试覆盖 1/128 位合法 session ID 原样传递、null/blank 省略、数字开头/非法字符/129 位 ID 的稳定合法映射；断言相同输入映射相同、不同输入映射不同，且异常/日志没有原始非法 ID。通过固定 `LongSupplier` 断言时间只取一次。拒绝测试覆盖 null/blank userId、null/blank session appName、非正时间，并断言 transport 零交互；另以 session appName 与 service 构造 appName 不同的正常用例确认保持既有调用侧 collection 语义；无有效消息用例断言仍先于字段校验短路。
 - 拒绝测试覆盖 HTTP 非 200、业务 `code != 0`、code 缺失/类型错误、非 JSON、AddSession session ID 缺失、SearchMemory result list 类型错误，以及四种 request ID 来源/缺失分支；用唯一假 Secret 验证异常与日志脱敏。
 - 完成条件：REQ-002、REQ-004 的 Memory 部分和 AC-003/004/006-011 可由单测追溯；Coding Agent 无需再猜测 Memory method、path、字段、成功/错误或 request ID 规则。
 

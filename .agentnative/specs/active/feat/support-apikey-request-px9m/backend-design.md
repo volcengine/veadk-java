@@ -147,12 +147,25 @@ non-success/network/parse failure -> 抛出 VikingDataPlaneException
 
 | Operation | Path | 请求体 | 成功响应中本 SDK 使用的字段 |
 | --- | --- | --- | --- |
-| AddSession | `/api/memory/session/add` | 本 SDK 固定发送 `collection_name`、`project_name`、`session_id`、`messages[]`；每个 message 保留当前 Java 模型的 `role`、`content`；发送 `metadata.default_user_id`、`metadata.default_assistant_id`、`metadata.time`。当前公开方法不产生 `profiles`、`store_file`、`resource_id`、`extract_memory_type`、TTL 字段，因此不发送这些可选字段。 | `code`、`message`、`data.session_id`、`request_id`；仅在 `code == 0` 且 `data.session_id` 为非空字符串时完成。 |
+| AddSession | `/api/memory/session/add` | 本 SDK 固定发送 `collection_name`、`project_name`、`messages[]`，并按下述规则发送或省略 `session_id`；每个 message 保留当前 Java 模型的 `role`、`content`；发送 `metadata.default_user_id`、`metadata.default_assistant_id`、`metadata.time`。当前公开方法不产生 `profiles`、`store_file`、`resource_id`、`extract_memory_type`、TTL 字段，因此不发送这些可选字段。 | `code`、`message`、`data.session_id`、`request_id`；仅在 `code == 0` 且 `data.session_id` 为非空字符串时完成。 |
 | SearchMemory | `/api/memory/search` | 必填 `collection_name`、`project_name`、`query`、`filter`、`limit`；`filter.user_id` 为调用入参，`filter.memory_type` 为解析后的配置列表。当前 config 未暴露 `resource_id`，因此使用 collection+project 定位；不发送未由当前 public API 提供的 `assistant_id`、`primary_key`、时间、group/session filter。 | `code`、`message`、`data.collection_name`、`data.count`、`data.result_list[]`、`data.token_usage`、`request_id`。每项协议字段为 `id`、`score`、`memory_type`、`user_id[]`、`assistant_id[]`、`session_id`、`group_id`、`time`、`status`、`labels`、`memory_info`；为保持现有返回契约，本 SDK 仅把 `memory_info.summary` 非空项映射为 `MemoryEntry`，成功且列表缺失/为空返回空列表。 |
+
+AddSession 字段来源与空值规则固定如下；只作用于新增 API Key client，既有 AK/SK wrapper 的请求体和 public 方法不在本需求中改变：
+
+| 请求字段 | Java 来源 | 空值、边界与兼容语义 |
+| --- | --- | --- |
+| `collection_name` | `Session.appName()`；这是现有 `addSessionToMemory` 传给 wrapper 的 collection 来源 | 现有 service 构造器只对非 null appName 做字符格式校验，并不保证 `Session.appName()` 非空；API Key 路径在组装请求前对 `Session.appName()` 做 null/blank 拒绝并抛不含业务内容的 `IllegalArgumentException`，不发网络请求。非空值原样发送，不新增与构造参数相等的限制，以保持当前允许调用侧 Session 决定 collection 的行为。 |
+| `project_name` | `VikingMemoryConfig.project`，按 §3.3 由显式参数、环境变量、默认 `default` 解析 | normalize 后不可能为空；若绕过 builder 得到空值则构造阶段拒绝，不发请求。 |
+| `session_id` | `Session.id()` | 若匹配 `^[A-Za-z][A-Za-z0-9_]{0,127}$`，原样发送。null/blank 时利用 HTTP 协议允许缺省的规则省略该字段，让服务端生成，保持旧实现未发送 session ID 的兼容语义。非空但不匹配时不拒绝调用，也不原样发送：确定性映射为 `s_` + 原始 UTF-8 值的 SHA-256 小写十六进制（固定 66 字符），保证首字符、字符集、长度合法且同一原始 ID 稳定映射；异常/日志不得输出原始 ID。 |
+| `messages[].role` | 通过现有筛选后的 `Event.author()` | 当前仅接受精确值 `user`；其它 role 继续被筛除。若最终无有效消息，保持既有短路成功且不发请求。 |
+| `messages[].content` | `Event.content().parts().get(0).text()` | 沿用既有筛选，只发送存在的首个 text part；null/缺失/空 Optional 被筛除。空字符串属于已存在的 text 值并原样发送，服务端业务拒绝时按错误契约抛异常，不在本需求中改变内容语义。 |
+| `metadata.default_user_id` | `Session.userId()` | 这是官方必填字段。null、空串或全空白时在组装请求前抛 `IllegalArgumentException`，不发请求；非空值原样发送，不静默替换成共享默认用户，避免用户记忆串写。该拒绝仅收紧此前最终也会形成无效请求的输入，不影响合法调用。 |
+| `metadata.default_assistant_id` | 沿用当前 `VikingMemoryService` 已使用的常量字符串 `assistant` | 固定非空，不从 `Event.author()` 或 appName 推导，不新增 public 配置；这是保持当前 Java 记忆归属语义的最小方案。 |
+| `metadata.time` | 在有效消息筛选完成后、组装一次 AddSession 请求前从 service 的毫秒时钟取得；生产默认使用 `System::currentTimeMillis` | 每次请求只取值一次并作为 Long 毫秒时间戳发送；不得为每条消息重复取时钟。为可测性提供 package-private 构造/工厂注入 `LongSupplier`，不扩大 public API；若取值 `<= 0` 则视为本地非法状态并抛 `IllegalStateException`，不发请求。 |
 
 流程约束：
 
-- `addSessionToMemory` 保留现有 user 文本事件筛选；无有效消息仍直接完成且不发请求。`session_id` 取 `Session.id()`，collection 取方法当前使用的 `session.appName()`，project 取 config；不得省略 session ID 后由服务端生成，以免丢失调用侧会话关联。官方文档提示仅 user 消息不会形成 assistant 关联，这是既有筛选行为的已知兼容限制，本需求不改变消息选择语义。
+- `addSessionToMemory` 先按既有规则筛选 user 文本事件；无有效消息时保持直接完成，不读取/校验 userId、session ID 或时间，也不发请求。存在有效消息时，再按上表校验 collection/user、规范化 session ID、取一次时间并组装请求。官方文档提示仅 user 消息不会形成 assistant 关联，这是既有筛选行为的已知兼容限制，本需求不改变消息选择语义。
 - `searchMemory` 保留 appName/userId/query/topK/memory types 的现有语义，collection 取方法入参 appName，project 取 config。
 - API Key client 不复用 `com.volcengine:vikingdb-java-sdk`：已核验的 `0.1.17` 没有 Memory API；也不新增其它依赖。
 - 当前 Java 无用户画像公开方法，本轮不新增。
@@ -246,6 +259,8 @@ non-success/network/parse failure -> 抛出 VikingDataPlaneException
 - 假 Secret 不出现在异常 message/cause 可见文本及捕获日志。
 - Memory AddSession/SearchMemory 对 method、path、headers、完整本轮字段集做结构断言；分别覆盖 HTTP 非 200、业务 `code != 0`、code 缺失/类型错误、非 JSON、AddSession session ID 缺失、SearchMemory 空/畸形 result list。
 - request ID 覆盖顶层 body 优先、旧 `ResponseMetadata.RequestId` 兼容、`X-Tt-Logid` fallback 和完全缺失为 `unknown`。
+- AddSession 正常映射断言：合法 `Session.id()` 原样进入 `session_id`，`Session.userId()` 进入 `metadata.default_user_id`，固定 `assistant` 进入 `default_assistant_id`，且 `metadata.time` 为请求组装时取得的一次正数毫秒值。
+- AddSession 边界/拒绝断言：1/128 位合法 session ID 原样传递；null/blank session ID 省略；数字开头、非法字符或超过 128 位的非空 ID 映射为稳定的 `s_<64位小写十六进制>`，不同原值不复用映射；null/blank userId、null/blank session appName、非正时间均在网络调用前失败；session appName 与 service 构造 appName 不同时仍原样作为 collection；无有效消息仍优先短路且不触发这些校验。
 
 开发节点使用 JaCoCo XML 对本次新增/修改可测行统计增量覆盖率，目标 `> 90%`；报告 `core/target/site/jacoco/jacoco.xml`，逐文件列出分子/分母与未覆盖行。
 
@@ -267,6 +282,7 @@ non-success/network/parse failure -> 抛出 VikingDataPlaneException
 | Secret 经异常或日志泄漏 | 唯一假 Secret 覆盖各失败路径并检索输出 |
 | 旧 AK/SK 用户行为回归 | 无 API Key 全链路回归，保留旧 public 构造器与方法 |
 | Memory 写入重复 | 客户端不自动重试，调用方显式决定重试 |
+| 非法 Session ID 导致服务拒绝或日志泄露 | 合法 ID 原样传递；非法非空 ID 只以 SHA-256 派生的合法稳定 ID 发往服务端，原值不进入日志/异常；空值按官方 HTTP 可选语义省略 |
 
 灰度以配置为边界：先在测试环境仅对预建 collection 启用 API Key，再扩大使用；观测鉴权失败码、request ID 和业务成功率。回滚优先移除 API Key 恢复 AK/SK，必要时回退 SDK；无数据库或不可逆数据迁移。
 
