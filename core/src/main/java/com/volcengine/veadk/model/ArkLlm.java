@@ -37,7 +37,6 @@ import com.volcengine.ark.runtime.model.completion.chat.ChatMessageRole;
 import com.volcengine.ark.runtime.model.completion.chat.ChatTool;
 import com.volcengine.ark.runtime.model.completion.chat.ChatToolCall;
 import com.volcengine.ark.runtime.service.ArkService;
-import com.volcengine.veadk.utils.EnvUtil;
 import com.volcengine.veadk.utils.JSONUtil;
 import io.reactivex.rxjava3.core.Flowable;
 import java.util.ArrayList;
@@ -70,6 +69,7 @@ public final class ArkLlm extends BaseLlm {
                     .build();
 
     private final ArkService arkService;
+    private final ArkLlmConfig config;
     private ChatCompletionRequest.ChatCompletionRequestThinking thinking = null;
 
     public ArkLlm(String modelName) {
@@ -77,12 +77,25 @@ public final class ArkLlm extends BaseLlm {
     }
 
     public ArkLlm(String modelName, String thinking) {
-        super(modelName);
-        Objects.requireNonNull(modelName, "modelName must be set.");
-        this.arkService = ArkService.builder().apiKey(EnvUtil.getAgentApiKey()).build();
-        if (StringUtils.isNotBlank(thinking)) {
-            this.thinking = new ChatCompletionRequest.ChatCompletionRequestThinking(thinking);
+        this(ArkLlmConfig.builder().modelName(modelName).thinking(thinking).build());
+    }
+
+    public ArkLlm(ArkLlmConfig config) {
+        super(Objects.requireNonNull(config, "config must be set.").getModelName());
+        this.config = config;
+        ArkService.Builder arkServiceBuilder = ArkService.builder().apiKey(config.getApiKey());
+        if (StringUtils.isNotBlank(config.getApiBase())) {
+            arkServiceBuilder.baseUrl(config.getApiBase());
         }
+        this.arkService = arkServiceBuilder.build();
+        if (StringUtils.isNotBlank(config.getThinking())) {
+            this.thinking =
+                    new ChatCompletionRequest.ChatCompletionRequestThinking(config.getThinking());
+        }
+    }
+
+    public ArkLlmConfig config() {
+        return config;
     }
 
     /**

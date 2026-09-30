@@ -100,11 +100,11 @@ public class Mem0MemoryService implements BaseMemoryService {
                                         .stream()
                                         .map(this::toMemoryEntry)
                                         .collect(Collectors.toList());
-                        return SearchMemoryResponse.builder().setMemories(entries).build();
+                        return SearchMemoryResponse.builder().memories(entries).build();
                     } catch (Exception e) {
                         log.error("searchMemory failed", e);
                         return SearchMemoryResponse.builder()
-                                .setMemories(Collections.emptyList())
+                                .memories(Collections.emptyList())
                                 .build();
                     }
                 });

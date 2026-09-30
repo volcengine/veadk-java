@@ -24,14 +24,15 @@ import com.volcengine.veadk.knowledgebase.BaseKnowledgebaseService;
 import io.reactivex.rxjava3.core.Completable;
 import io.reactivex.rxjava3.core.Single;
 import java.lang.reflect.Method;
+import java.util.Objects;
 
 public class LoadKnowledgebaseTool extends FunctionTool {
 
-    private static BaseKnowledgebaseService knowledgebaseService;
+    private final BaseKnowledgebaseService knowledgebaseService;
 
     private static Method getLoadKnowledgeMethod() {
         try {
-            return LoadKnowledgebaseTool.class.getMethod(
+            return KnowledgebaseLoader.class.getMethod(
                     "loadKnowledgebase", String.class, ToolContext.class);
         } catch (NoSuchMethodException e) {
             throw new IllegalStateException("Failed to load knowledge method.", e);
@@ -40,14 +41,15 @@ public class LoadKnowledgebaseTool extends FunctionTool {
 
     public LoadKnowledgebaseTool(BaseKnowledgebaseService knowledgebaseService) {
         super(
-                /* instance= */ null,
+                /* instance= */ new KnowledgebaseLoader(knowledgebaseService),
                 getLoadKnowledgeMethod(),
                 /* isLongRunning= */ false,
                 /* requireConfirmation= */ false);
-        this.knowledgebaseService = knowledgebaseService;
+        this.knowledgebaseService =
+                Objects.requireNonNull(knowledgebaseService, "knowledgebaseService must be set.");
     }
 
-    public static Single<LoadKnowledgebaseResponse> loadKnowledgebase(
+    public Single<LoadKnowledgebaseResponse> loadKnowledgebase(
             @Annotations.Schema(name = "query") String query,
             @Annotations.Schema(name = "toolContext") ToolContext toolContext) {
         return knowledgebaseService
@@ -67,8 +69,29 @@ public class LoadKnowledgebaseTool extends FunctionTool {
                                 llmRequestBuilder.appendInstructions(
                                         ImmutableList.of(
                                                 """
-                                                You have a knowledgebase. You can use it to answer questions. If any questions need you
-                                                to look up the knowledgebase, you should call loadKnowledgebase function with a query.
+                                                        You have a knowledgebase. You can use it to answer questions. If any questions need you
+                                                        to look up the knowledgebase, you should call loadKnowledgebase function with a query.
                                                 """)));
+    }
+
+    public static final class KnowledgebaseLoader {
+        private final BaseKnowledgebaseService knowledgebaseService;
+
+        private KnowledgebaseLoader(BaseKnowledgebaseService knowledgebaseService) {
+            this.knowledgebaseService =
+                    Objects.requireNonNull(
+                            knowledgebaseService, "knowledgebaseService must be set.");
+        }
+
+        public Single<LoadKnowledgebaseResponse> loadKnowledgebase(
+                @Annotations.Schema(name = "query") String query,
+                @Annotations.Schema(name = "toolContext") ToolContext toolContext) {
+            return knowledgebaseService
+                    .searchKnowledgebase(query)
+                    .map(
+                            searchKnowledgebaseResponse ->
+                                    new LoadKnowledgebaseResponse(
+                                            searchKnowledgebaseResponse.getKnowledgebaseEntries()));
+        }
     }
 }

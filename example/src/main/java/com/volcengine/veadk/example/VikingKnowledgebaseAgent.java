@@ -24,9 +24,9 @@ import com.google.adk.events.Event;
 import com.google.adk.sessions.Session;
 import com.google.genai.types.Content;
 import com.google.genai.types.Part;
+import com.volcengine.veadk.Runner;
 import com.volcengine.veadk.knowledgebase.KnowledgeBase;
 import com.volcengine.veadk.model.ArkLlm;
-import com.volcengine.veadk.runner.Runner;
 import com.volcengine.veadk.tools.knowledgebase.LoadKnowledgebaseTool;
 import io.reactivex.rxjava3.core.Flowable;
 import java.io.IOException;
@@ -64,13 +64,13 @@ public class VikingKnowledgebaseAgent {
 
             Runner runner = new Runner(agent);
             RunConfig runConfig =
-                    RunConfig.builder().setStreamingMode(RunConfig.StreamingMode.NONE).build();
+                    RunConfig.builder().streamingMode(RunConfig.StreamingMode.NONE).build();
 
             String userId = "user";
             String sessionId = "viking-knowledgebase-session";
             Session session =
                     runner.sessionService()
-                            .createSession(runner.appName(), userId, null, sessionId)
+                            .createSession(runner.appName(), userId, java.util.Map.of(), sessionId)
                             .blockingGet();
 
             try (Scanner scanner = new Scanner(System.in, UTF_8)) {

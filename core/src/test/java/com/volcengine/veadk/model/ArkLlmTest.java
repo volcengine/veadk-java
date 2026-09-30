@@ -42,9 +42,13 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junitpioneer.jupiter.ClearEnvironmentVariable;
+import org.junitpioneer.jupiter.SetEnvironmentVariable;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.MockedStatic;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -68,17 +72,57 @@ class ArkLlmTest {
     }
 
     @Test
+    @SetEnvironmentVariable(key = "MODEL_AGENT_API_KEY", value = "env-api-key")
+    void constructorUsesEnvApiKeyWhenExplicitKeyIsAbsent() {
+        ArkLlm llm = new ArkLlm("env-model");
+
+        assertEquals("env-model", llm.config().getModelName());
+        assertEquals("env-api-key", llm.config().getApiKey());
+    }
+
+    @Test
+    @SetEnvironmentVariable(key = "MODEL_AGENT_API_KEY", value = "env-api-key")
+    void explicitApiKeyOverridesEnvApiKey() {
+        ArkLlm llm =
+                new ArkLlm(
+                        ArkLlmConfig.builder()
+                                .modelName("explicit-model")
+                                .apiKey("explicit-api-key")
+                                .build());
+
+        assertEquals("explicit-api-key", llm.config().getApiKey());
+    }
+
+    @Test
+    @ClearEnvironmentVariable(key = "MODEL_AGENT_API_KEY")
+    void missingApiKeyFailsWithClearMessage() {
+        IllegalStateException exception =
+                Assertions.assertThrows(
+                        IllegalStateException.class,
+                        () -> ArkLlmConfig.builder().modelName("missing-key-model").build());
+
+        assertTrue(exception.getMessage().contains("MODEL_AGENT_API_KEY"));
+    }
+
+    @Test
+    @SetEnvironmentVariable(key = "MODEL_AGENT_API_KEY", value = "env-api-key")
+    void thinkingFromLegacyConstructorIsAppliedToArkRequest() throws Exception {
+        ArkLlm llm = new ArkLlm("thinking-model", "enabled");
+        injectArkService(llm);
+        when(arkService.createChatCompletion(any(ChatCompletionRequest.class)))
+                .thenReturn(createMockTextResult("thinking ok"));
+
+        llm.generateContent(simpleRequest("thinking-model", "Hello"), false).blockingFirst();
+
+        ArgumentCaptor<ChatCompletionRequest> requestCaptor =
+                ArgumentCaptor.forClass(ChatCompletionRequest.class);
+        org.mockito.Mockito.verify(arkService).createChatCompletion(requestCaptor.capture());
+        assertEquals("enabled", requestCaptor.getValue().getThinking().getType());
+    }
+
+    @Test
     void generateContent_nonStreaming_textResponse() throws InterruptedException {
-        LlmRequest llmRequest =
-                LlmRequest.builder()
-                        .model("test-model")
-                        .contents(
-                                Collections.singletonList(
-                                        Content.builder()
-                                                .role("user")
-                                                .parts(Part.fromText("Hello"))
-                                                .build()))
-                        .build();
+        LlmRequest llmRequest = simpleRequest("test-model", "Hello");
 
         ChatCompletionResult mockResult = createMockTextResult("Hi there!");
         when(arkService.createChatCompletion(any(ChatCompletionRequest.class)))
@@ -98,16 +142,7 @@ class ArkLlmTest {
 
     @Test
     void generateContent_nonStreaming_toolCallResponse() throws InterruptedException {
-        LlmRequest llmRequest =
-                LlmRequest.builder()
-                        .model("test-model")
-                        .contents(
-                                Collections.singletonList(
-                                        Content.builder()
-                                                .role("user")
-                                                .parts(Part.fromText("Search for cats"))
-                                                .build()))
-                        .build();
+        LlmRequest llmRequest = simpleRequest("test-model", "Search for cats");
 
         ChatFunctionCall function = new ChatFunctionCall();
         function.setName("search");
@@ -141,16 +176,7 @@ class ArkLlmTest {
 
     @Test
     void generateContent_streaming_textResponse() throws InterruptedException {
-        LlmRequest llmRequest =
-                LlmRequest.builder()
-                        .model("test-model")
-                        .contents(
-                                Collections.singletonList(
-                                        Content.builder()
-                                                .role("user")
-                                                .parts(Part.fromText("Hello"))
-                                                .build()))
-                        .build();
+        LlmRequest llmRequest = simpleRequest("test-model", "Hello");
 
         io.reactivex.Flowable<ChatCompletionChunk> chunkFlowable =
                 io.reactivex.Flowable.just(
@@ -193,6 +219,24 @@ class ArkLlmTest {
         mockChoice.setFinishReason("stop");
         mockResult.setChoices(Collections.singletonList(mockChoice));
         return mockResult;
+    }
+
+    private LlmRequest simpleRequest(String modelName, String content) {
+        return LlmRequest.builder()
+                .model(modelName)
+                .contents(
+                        Collections.singletonList(
+                                Content.builder()
+                                        .role("user")
+                                        .parts(Part.fromText(content))
+                                        .build()))
+                .build();
+    }
+
+    private void injectArkService(ArkLlm llm) throws NoSuchFieldException, IllegalAccessException {
+        Field field = ArkLlm.class.getDeclaredField("arkService");
+        field.setAccessible(true);
+        field.set(llm, arkService);
     }
 
     private ChatCompletionResult createMockToolCallResult(List<ChatToolCall> toolCalls) {
