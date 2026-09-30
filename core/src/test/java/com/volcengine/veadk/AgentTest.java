@@ -34,6 +34,8 @@ import com.volcengine.veadk.knowledgebase.KnowledgebaseEntry;
 import com.volcengine.veadk.knowledgebase.SearchKnowledgebaseResponse;
 import com.volcengine.veadk.memory.SaveSessionToMemoryCallback;
 import com.volcengine.veadk.model.ArkLlm;
+import com.volcengine.veadk.model.ModelProvider;
+import com.volcengine.veadk.model.OpenAiCompatibleLlm;
 import com.volcengine.veadk.tools.knowledgebase.LoadKnowledgebaseTool;
 import io.reactivex.rxjava3.core.Flowable;
 import io.reactivex.rxjava3.core.Maybe;
@@ -127,6 +129,94 @@ class AgentTest {
         assertThat(agent.model().orElseThrow().model().orElseThrow()).isInstanceOf(ArkLlm.class);
         ArkLlm arkLlm = (ArkLlm) agent.model().orElseThrow().model().orElseThrow();
         assertThat(arkLlm.config().getApiKey()).isEqualTo("explicit-api-key");
+    }
+
+    @Test
+    @ClearEnvironmentVariable(key = "MODEL_AGENT_API_KEY")
+    void explicitArkProviderCreatesArkLlm() {
+        Agent agent =
+                Agent.builder()
+                        .name("explicit_ark_agent")
+                        .modelProvider("ark")
+                        .model("doubao-seed-2-1-pro-260628")
+                        .modelApiKey("explicit-api-key")
+                        .modelApiBase("https://ark.example.com/api/v3")
+                        .build();
+
+        assertThat(agent.veadkModelName()).isEqualTo("doubao-seed-2-1-pro-260628");
+        ArkLlm arkLlm = (ArkLlm) agent.model().orElseThrow().model().orElseThrow();
+        assertThat(arkLlm.config().getModelName()).isEqualTo("doubao-seed-2-1-pro-260628");
+        assertThat(arkLlm.config().getApiKey()).isEqualTo("explicit-api-key");
+        assertThat(arkLlm.config().getApiBase()).isEqualTo("https://ark.example.com/api/v3");
+    }
+
+    @Test
+    @ClearEnvironmentVariable(key = "MODEL_AGENT_API_KEY")
+    void openAiPrefixCreatesOpenAiCompatibleLlm() {
+        Agent agent =
+                Agent.builder()
+                        .name("openai_prefix_agent")
+                        .model("openai/gpt-4o")
+                        .modelApiKey("openai-key")
+                        .modelBaseUrl("https://api.openai.com/v1")
+                        .build();
+
+        assertThat(agent.veadkModelName()).isEqualTo("gpt-4o");
+        OpenAiCompatibleLlm llm =
+                (OpenAiCompatibleLlm) agent.model().orElseThrow().model().orElseThrow();
+        assertThat(llm.model()).isEqualTo("gpt-4o");
+        assertThat(llm.config().getApiKey()).isEqualTo("openai-key");
+        assertThat(llm.config().getBaseUrl()).isEqualTo("https://api.openai.com/v1");
+    }
+
+    @Test
+    @ClearEnvironmentVariable(key = "MODEL_AGENT_API_KEY")
+    void explicitOpenAiProviderCreatesOpenAiCompatibleLlm() {
+        Agent agent =
+                Agent.builder()
+                        .name("openai_provider_agent")
+                        .modelProvider(ModelProvider.OPENAI_COMPATIBLE)
+                        .model("anthropic/claude-sonnet-4")
+                        .modelApiKey("litellm-key")
+                        .modelBaseUrl("http://localhost:4000/v1")
+                        .build();
+
+        assertThat(agent.veadkModelName()).isEqualTo("anthropic/claude-sonnet-4");
+        OpenAiCompatibleLlm llm =
+                (OpenAiCompatibleLlm) agent.model().orElseThrow().model().orElseThrow();
+        assertThat(llm.model()).isEqualTo("anthropic/claude-sonnet-4");
+        assertThat(llm.config().getBaseUrl()).isEqualTo("http://localhost:4000/v1");
+    }
+
+    @Test
+    @ClearEnvironmentVariable(key = "MODEL_AGENT_API_KEY")
+    void openAiCompatibleRequiresModelBaseUrl() {
+        assertThatThrownBy(
+                        () ->
+                                Agent.builder()
+                                        .name("missing_base_url_agent")
+                                        .modelProvider("openai")
+                                        .model("gpt-4o")
+                                        .modelApiKey("openai-key")
+                                        .build())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("modelBaseUrl must be set");
+    }
+
+    @Test
+    void explicitBaseLlmHasHighestPriorityOverProviderConfig() {
+        TestLlm testLlm = new TestLlm("custom-model");
+
+        Agent agent =
+                Agent.builder()
+                        .name("custom_model_priority_agent")
+                        .modelProvider("openai")
+                        .modelApiKey("openai-key")
+                        .model(testLlm)
+                        .build();
+
+        assertThat(agent.veadkModelName()).isEqualTo("custom-model");
+        assertThat(agent.model().orElseThrow().model().orElseThrow()).isSameAs(testLlm);
     }
 
     @Test

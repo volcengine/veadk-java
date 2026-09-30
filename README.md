@@ -28,15 +28,42 @@ Agent agent = Agent.builder()
     .name("quickstart-agent")
     .description("Answers user questions.")
     .instruction("You are a helpful assistant.")
-    .modelName("doubao-seed-2-1-pro-260628")
+    .model("doubao-seed-2-1-pro-260628")
     .modelApiKey(System.getenv("MODEL_AGENT_API_KEY"))
     .build();
 ```
 
-`modelName(...)` creates a default `ArkLlm` at build time. Configure the Ark API
-key with `modelApiKey(...)`, or leave it unset to read `MODEL_AGENT_API_KEY`
-from the environment. Use `modelApiBase(...)` / `modelBaseUrl(...)` when you
-need a custom Ark endpoint.
+Without an explicit provider, VeADK defaults to Ark and creates an `ArkLlm` at
+build time. Configure the Ark API key with `modelApiKey(...)`, or leave it unset
+to read `MODEL_AGENT_API_KEY` from the environment. Use `modelApiBase(...)` /
+`modelBaseUrl(...)` when you need a custom Ark endpoint.
+
+OpenAI-compatible endpoints are configured the same way, without requiring
+application code to construct an ADK `BaseLlm`:
+
+```java
+Agent agent = Agent.builder()
+    .name("openai-agent")
+    .instruction("You are a helpful assistant.")
+    .model("openai/gpt-4o")
+    .modelApiKey(System.getenv("OPENAI_API_KEY"))
+    .modelBaseUrl("https://api.openai.com/v1")
+    .build();
+```
+
+For LiteLLM Proxy or an internal OpenAI-compatible gateway, set the base URL to
+that endpoint. Use `modelProvider("openai")` when the model name itself contains
+provider routing text:
+
+```java
+Agent agent = Agent.builder()
+    .name("litellm-agent")
+    .modelProvider("openai")
+    .model("anthropic/claude-sonnet-4")
+    .modelApiKey(System.getenv("LITELLM_API_KEY"))
+    .modelBaseUrl("http://localhost:4000/v1")
+    .build();
+```
 
 You can also provide an explicit ADK `BaseLlm` instance when you want to own the
 model configuration yourself:
@@ -91,11 +118,11 @@ The extracted metadata includes:
   are `web_search`, `loadKnowledgebase`, and `loadMemory`.
 
 ### Required Environment Variables
-Examples that instantiate or call `ArkLlm` without an explicit API key require
-the following environment variable before running (an explicit error is thrown
-if missing):
+Examples that auto-create a model without an explicit API key require the
+following environment variable before running (an explicit error is thrown if
+missing):
 
-  - `MODEL_AGENT_API_KEY`: API Key for Volcengine Ark service (used by `ArkLlm`)
+  - `MODEL_AGENT_API_KEY`: default API key for auto-created model adapters
  
 Example setup (macOS / Linux):
 

@@ -32,6 +32,9 @@ import com.volcengine.veadk.knowledgebase.BaseKnowledgebaseService;
 import com.volcengine.veadk.memory.SaveSessionToMemoryCallback;
 import com.volcengine.veadk.model.ArkLlm;
 import com.volcengine.veadk.model.ArkLlmConfig;
+import com.volcengine.veadk.model.ModelProvider;
+import com.volcengine.veadk.model.OpenAiCompatibleLlm;
+import com.volcengine.veadk.model.OpenAiCompatibleLlmConfig;
 import com.volcengine.veadk.tools.knowledgebase.LoadKnowledgebaseTool;
 import io.reactivex.rxjava3.core.Maybe;
 import java.util.ArrayList;
@@ -101,6 +104,7 @@ public final class Agent extends LlmAgent {
         private List<String> explicitToolNames = List.of();
         private List<String> autoToolNames = List.of();
         private boolean explicitModelConfigured;
+        private ModelProvider modelProvider;
         private String modelApiKey;
         private String modelApiBase;
         private String modelThinking;
@@ -116,6 +120,16 @@ public final class Agent extends LlmAgent {
 
         public Builder modelName(String modelName) {
             return model(modelName);
+        }
+
+        public Builder modelProvider(String provider) {
+            this.modelProvider = ModelProvider.from(provider);
+            return this;
+        }
+
+        public Builder modelProvider(ModelProvider provider) {
+            this.modelProvider = Objects.requireNonNull(provider, "provider must be set.");
+            return this;
         }
 
         public Builder knowledgebase(BaseKnowledgebaseService service) {
@@ -479,14 +493,51 @@ public final class Agent extends LlmAgent {
             if (explicitModelConfigured) {
                 return;
             }
-            super.model(
-                    new ArkLlm(
-                            ArkLlmConfig.builder()
-                                    .modelName(veadkModelName)
-                                    .apiKey(modelApiKey)
-                                    .apiBase(modelApiBase)
-                                    .thinking(modelThinking)
-                                    .build()));
+            ResolvedModel resolvedModel = resolveModel(modelProvider, veadkModelName);
+            this.veadkModelName = resolvedModel.modelName();
+            switch (resolvedModel.provider()) {
+                case ARK ->
+                        super.model(
+                                new ArkLlm(
+                                        ArkLlmConfig.builder()
+                                                .modelName(resolvedModel.modelName())
+                                                .apiKey(modelApiKey)
+                                                .apiBase(modelApiBase)
+                                                .thinking(modelThinking)
+                                                .build()));
+                case OPENAI_COMPATIBLE ->
+                        super.model(
+                                new OpenAiCompatibleLlm(
+                                        OpenAiCompatibleLlmConfig.builder()
+                                                .modelName(resolvedModel.modelName())
+                                                .apiKey(modelApiKey)
+                                                .baseUrl(modelApiBase)
+                                                .build()));
+            }
+        }
+
+        private static ResolvedModel resolveModel(
+                ModelProvider explicitProvider, String configuredModelName) {
+            String modelName = requireText(configuredModelName, "model must be set.").trim();
+            if (explicitProvider != null) {
+                return new ResolvedModel(explicitProvider, modelName);
+            }
+            int providerSeparator = modelName.indexOf('/');
+            if (providerSeparator > 0 && providerSeparator < modelName.length() - 1) {
+                String prefix = modelName.substring(0, providerSeparator);
+                if (isSupportedProviderPrefix(prefix)) {
+                    return new ResolvedModel(
+                            ModelProvider.from(prefix), modelName.substring(providerSeparator + 1));
+                }
+            }
+            return new ResolvedModel(ModelProvider.ARK, modelName);
+        }
+
+        private static boolean isSupportedProviderPrefix(String prefix) {
+            return "ark".equalsIgnoreCase(prefix)
+                    || "openai".equalsIgnoreCase(prefix)
+                    || "openai-compatible".equalsIgnoreCase(prefix)
+                    || "openai_compatible".equalsIgnoreCase(prefix);
         }
 
         private void prepareAutoComponents() {
@@ -607,5 +658,7 @@ public final class Agent extends LlmAgent {
                             + " is not supported in Agent PR-0. The Java Agent keeps this"
                             + " Python-side option fail-fast until a typed Java design is added.");
         }
+
+        private record ResolvedModel(ModelProvider provider, String modelName) {}
     }
 }

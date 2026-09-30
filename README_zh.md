@@ -27,15 +27,41 @@ Agent agent = Agent.builder()
     .name("quickstart-agent")
     .description("回答用户问题。")
     .instruction("你是一个有帮助的助手。")
-    .modelName("doubao-seed-2-1-pro-260628")
+    .model("doubao-seed-2-1-pro-260628")
     .modelApiKey(System.getenv("MODEL_AGENT_API_KEY"))
     .build();
 ```
 
-`modelName(...)` 会在 build 阶段创建默认 `ArkLlm`。可以通过
+没有显式 provider 时，VeADK 默认走 Ark，并在 build 阶段创建 `ArkLlm`。可以通过
 `modelApiKey(...)` 显式传入 Ark API key；如果不传，则从环境变量
 `MODEL_AGENT_API_KEY` 读取。需要自定义 Ark endpoint 时可使用
 `modelApiBase(...)` / `modelBaseUrl(...)`。
+
+OpenAI-compatible endpoint 也可以用同一套配置方式，业务代码不需要自己创建 ADK
+`BaseLlm`：
+
+```java
+Agent agent = Agent.builder()
+    .name("openai-agent")
+    .instruction("你是一个有帮助的助手。")
+    .model("openai/gpt-4o")
+    .modelApiKey(System.getenv("OPENAI_API_KEY"))
+    .modelBaseUrl("https://api.openai.com/v1")
+    .build();
+```
+
+如果使用 LiteLLM Proxy 或内部 OpenAI-compatible 网关，把 base URL 指到对应 endpoint
+即可。模型名本身带 provider 路由信息时，可以显式指定 `modelProvider("openai")`：
+
+```java
+Agent agent = Agent.builder()
+    .name("litellm-agent")
+    .modelProvider("openai")
+    .model("anthropic/claude-sonnet-4")
+    .modelApiKey(System.getenv("LITELLM_API_KEY"))
+    .modelBaseUrl("http://localhost:4000/v1")
+    .build();
+```
 
 如果你希望自己控制模型配置，也可以直接传入 ADK `BaseLlm` 实例：
 
@@ -87,10 +113,10 @@ metadata 输出包含：
   规范工具名是 `web_search`、`loadKnowledgebase`、`loadMemory`。
 
 ### 必需环境变量
-未显式传入 API key 时，实例化或调用 `ArkLlm` 的示例在运行前需要配置以下环境变量
+未显式传入 API key 且需要自动创建模型适配器时，示例在运行前需要配置以下环境变量
 （缺失时会抛出明确错误）：
 
-  - `MODEL_AGENT_API_KEY`：火山方舟服务的 API Key（`ArkLlm` 使用）
+  - `MODEL_AGENT_API_KEY`：自动创建模型适配器时使用的默认 API Key
  
 示例设置（macOS / Linux）：
 
