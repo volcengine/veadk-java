@@ -32,7 +32,7 @@ public enum ModelProvider {
 
     public static ModelProvider from(String value) {
         if (value == null || value.isBlank()) {
-            return ARK;
+            return OPENAI_COMPATIBLE;
         }
 
         return switch (value.trim().toLowerCase()) {

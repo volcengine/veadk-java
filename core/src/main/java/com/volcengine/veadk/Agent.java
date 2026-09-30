@@ -544,7 +544,7 @@ public final class Agent extends LlmAgent {
                             ModelProvider.from(prefix), modelName.substring(providerSeparator + 1));
                 }
             }
-            return new ResolvedModel(ModelProvider.ARK, modelName);
+            return new ResolvedModel(ModelProvider.OPENAI_COMPATIBLE, modelName);
         }
 
         private static boolean isSupportedProviderPrefix(String prefix) {

@@ -35,6 +35,7 @@ import com.volcengine.veadk.knowledgebase.SearchKnowledgebaseResponse;
 import com.volcengine.veadk.memory.SaveSessionToMemoryCallback;
 import com.volcengine.veadk.memory.ShortTermMemory;
 import com.volcengine.veadk.model.ArkLlm;
+import com.volcengine.veadk.model.ArkLlmConfig;
 import com.volcengine.veadk.model.ModelProvider;
 import com.volcengine.veadk.model.OpenAiCompatibleLlm;
 import com.volcengine.veadk.tools.knowledgebase.LoadKnowledgebaseTool;
@@ -51,6 +52,7 @@ class AgentTest {
 
     @Test
     @SetEnvironmentVariable(key = "MODEL_AGENT_API_KEY", value = "test-api-key")
+    @ClearEnvironmentVariable(key = "MODEL_AGENT_API_BASE")
     void buildWithoutOverridesUsesVeadkDefaults() {
         Agent agent = Agent.builder().build();
 
@@ -60,8 +62,11 @@ class AgentTest {
         assertThat(agent.metadataSnapshot().instructionSummary())
                 .isEqualTo(Agent.DEFAULT_INSTRUCTION);
         assertThat(agent.model()).isPresent();
-        assertThat(agent.model().orElseThrow().model().orElseThrow().model())
-                .isEqualTo(Agent.DEFAULT_MODEL_NAME);
+        OpenAiCompatibleLlm llm =
+                (OpenAiCompatibleLlm) agent.model().orElseThrow().model().orElseThrow();
+        assertThat(llm.model()).isEqualTo(Agent.DEFAULT_MODEL_NAME);
+        assertThat(llm.config().getApiKey()).isEqualTo("test-api-key");
+        assertThat(llm.config().getBaseUrl()).isEqualTo(ArkLlmConfig.DEFAULT_API_BASE);
     }
 
     @Test
@@ -102,7 +107,8 @@ class AgentTest {
 
     @Test
     @SetEnvironmentVariable(key = "MODEL_AGENT_API_KEY", value = "test-api-key")
-    void modelNameCreatesArkLlm() {
+    @SetEnvironmentVariable(key = "MODEL_AGENT_API_BASE", value = "https://default.example.com/v1")
+    void modelNameCreatesOpenAiCompatibleLlm() {
         Agent agent =
                 Agent.builder()
                         .name("model_name_agent")
@@ -111,14 +117,16 @@ class AgentTest {
 
         assertThat(agent.veadkModelName()).isEqualTo("doubao-seed-2-1-pro-260628");
         assertThat(agent.model()).isPresent();
-        assertThat(agent.model().orElseThrow().model().orElseThrow()).isInstanceOf(ArkLlm.class);
-        assertThat(agent.model().orElseThrow().model().orElseThrow().model())
-                .isEqualTo("doubao-seed-2-1-pro-260628");
+        OpenAiCompatibleLlm llm =
+                (OpenAiCompatibleLlm) agent.model().orElseThrow().model().orElseThrow();
+        assertThat(llm.model()).isEqualTo("doubao-seed-2-1-pro-260628");
+        assertThat(llm.config().getBaseUrl()).isEqualTo("https://default.example.com/v1");
     }
 
     @Test
     @ClearEnvironmentVariable(key = "MODEL_AGENT_API_KEY")
-    void modelApiKeyCreatesArkLlmWithoutEnv() {
+    @ClearEnvironmentVariable(key = "MODEL_AGENT_API_BASE")
+    void modelApiKeyCreatesOpenAiCompatibleLlmWithoutEnv() {
         Agent agent =
                 Agent.builder()
                         .name("explicit_key_agent")
@@ -127,9 +135,10 @@ class AgentTest {
                         .build();
 
         assertThat(agent.model()).isPresent();
-        assertThat(agent.model().orElseThrow().model().orElseThrow()).isInstanceOf(ArkLlm.class);
-        ArkLlm arkLlm = (ArkLlm) agent.model().orElseThrow().model().orElseThrow();
-        assertThat(arkLlm.config().getApiKey()).isEqualTo("explicit-api-key");
+        OpenAiCompatibleLlm llm =
+                (OpenAiCompatibleLlm) agent.model().orElseThrow().model().orElseThrow();
+        assertThat(llm.config().getApiKey()).isEqualTo("explicit-api-key");
+        assertThat(llm.config().getBaseUrl()).isEqualTo(ArkLlmConfig.DEFAULT_API_BASE);
     }
 
     @Test
@@ -191,17 +200,19 @@ class AgentTest {
 
     @Test
     @ClearEnvironmentVariable(key = "MODEL_AGENT_API_KEY")
-    void openAiCompatibleRequiresModelBaseUrl() {
-        assertThatThrownBy(
-                        () ->
-                                Agent.builder()
-                                        .name("missing_base_url_agent")
-                                        .modelProvider("openai")
-                                        .model("gpt-4o")
-                                        .modelApiKey("openai-key")
-                                        .build())
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("modelBaseUrl must be set");
+    @ClearEnvironmentVariable(key = "MODEL_AGENT_API_BASE")
+    void openAiCompatibleUsesDefaultBaseUrl() {
+        Agent agent =
+                Agent.builder()
+                        .name("default_base_url_agent")
+                        .modelProvider("openai")
+                        .model("gpt-4o")
+                        .modelApiKey("openai-key")
+                        .build();
+
+        OpenAiCompatibleLlm llm =
+                (OpenAiCompatibleLlm) agent.model().orElseThrow().model().orElseThrow();
+        assertThat(llm.config().getBaseUrl()).isEqualTo(ArkLlmConfig.DEFAULT_API_BASE);
     }
 
     @Test
@@ -222,7 +233,7 @@ class AgentTest {
 
     @Test
     @ClearEnvironmentVariable(key = "MODEL_AGENT_API_KEY")
-    void modelNameAfterExplicitModelReconfiguresArkLlm() {
+    void modelNameAfterExplicitModelReconfiguresOpenAiCompatibleLlm() {
         Agent agent =
                 Agent.builder()
                         .name("model_order_agent")
@@ -233,14 +244,15 @@ class AgentTest {
 
         assertThat(agent.veadkModelName()).isEqualTo("second-model");
         assertThat(agent.model()).isPresent();
-        assertThat(agent.model().orElseThrow().model().orElseThrow()).isInstanceOf(ArkLlm.class);
+        assertThat(agent.model().orElseThrow().model().orElseThrow())
+                .isInstanceOf(OpenAiCompatibleLlm.class);
         assertThat(agent.model().orElseThrow().model().orElseThrow().model())
                 .isEqualTo("second-model");
     }
 
     @Test
     @ClearEnvironmentVariable(key = "MODEL_AGENT_API_KEY")
-    void missingModelApiKeyFailsFastWhenAutoCreatingArkLlm() {
+    void missingModelApiKeyFailsFastWhenAutoCreatingModel() {
         assertThatThrownBy(
                         () ->
                                 Agent.builder()

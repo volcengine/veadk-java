@@ -28,7 +28,7 @@ public final class OpenAiCompatibleLlmConfig {
     private OpenAiCompatibleLlmConfig(Builder builder) {
         this.modelName = requireText(builder.modelName, "modelName must be set.");
         this.apiKey = resolveApiKey(builder.apiKey);
-        this.baseUrl = requireText(builder.baseUrl, "modelBaseUrl must be set.");
+        this.baseUrl = resolveBaseUrl(builder.baseUrl);
     }
 
     public static Builder builder() {
@@ -52,6 +52,14 @@ public final class OpenAiCompatibleLlmConfig {
             return explicitApiKey.trim();
         }
         return EnvUtil.getAgentApiKey();
+    }
+
+    private static String resolveBaseUrl(String explicitBaseUrl) {
+        if (StringUtils.isNotBlank(explicitBaseUrl)) {
+            return explicitBaseUrl.trim();
+        }
+        String envApiBase = System.getenv(ArkLlmConfig.MODEL_AGENT_API_BASE);
+        return StringUtils.isBlank(envApiBase) ? ArkLlmConfig.DEFAULT_API_BASE : envApiBase.trim();
     }
 
     private static String requireText(String value, String message) {

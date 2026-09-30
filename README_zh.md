@@ -32,9 +32,10 @@ Agent agent = Agent.builder()
     .build();
 ```
 
-没有显式 provider 时，VeADK 默认走 Ark，并在 build 阶段创建 `ArkLlm`。可以通过
-`modelApiKey(...)` 显式传入 Ark API key；如果不传，则从环境变量
-`MODEL_AGENT_API_KEY` 读取。需要自定义 Ark endpoint 时可使用
+没有显式 provider 时，VeADK 和 veadk-python 一样默认走 OpenAI-compatible 路径。
+可以通过 `modelApiKey(...)` 显式传入 API key；如果不传，则从环境变量
+`MODEL_AGENT_API_KEY` 读取。默认 base URL 是 Ark 的 OpenAI-compatible endpoint；
+需要使用 OpenAI 官方、LiteLLM Proxy 或其他兼容网关时，可使用
 `modelApiBase(...)` / `modelBaseUrl(...)`。
 
 OpenAI-compatible endpoint 也可以用同一套配置方式，业务代码不需要自己创建 ADK
@@ -47,6 +48,18 @@ Agent agent = Agent.builder()
     .model("openai/gpt-4o")
     .modelApiKey(System.getenv("OPENAI_API_KEY"))
     .modelBaseUrl("https://api.openai.com/v1")
+    .build();
+```
+
+只有需要 Ark 专用 `ArkLlm` 适配器时，才显式指定 `modelProvider("ark")`：
+
+```java
+Agent agent = Agent.builder()
+    .name("ark-agent")
+    .modelProvider("ark")
+    .model("doubao-seed-2-1-pro-260628")
+    .modelApiKey(System.getenv("MODEL_AGENT_API_KEY"))
+    .modelApiBase("https://ark.cn-beijing.volces.com/api/v3")
     .build();
 ```
 

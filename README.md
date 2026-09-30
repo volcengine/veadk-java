@@ -33,10 +33,12 @@ Agent agent = Agent.builder()
     .build();
 ```
 
-Without an explicit provider, VeADK defaults to Ark and creates an `ArkLlm` at
-build time. Configure the Ark API key with `modelApiKey(...)`, or leave it unset
-to read `MODEL_AGENT_API_KEY` from the environment. Use `modelApiBase(...)` /
-`modelBaseUrl(...)` when you need a custom Ark endpoint.
+Without an explicit provider, VeADK follows veadk-python and uses the
+OpenAI-compatible path by default. Configure the API key with `modelApiKey(...)`,
+or leave it unset to read `MODEL_AGENT_API_KEY` from the environment. The
+default base URL is Ark's OpenAI-compatible endpoint; use `modelApiBase(...)` /
+`modelBaseUrl(...)` when you need OpenAI official, LiteLLM Proxy, or another
+compatible gateway.
 
 OpenAI-compatible endpoints are configured the same way, without requiring
 application code to construct an ADK `BaseLlm`:
@@ -48,6 +50,18 @@ Agent agent = Agent.builder()
     .model("openai/gpt-4o")
     .modelApiKey(System.getenv("OPENAI_API_KEY"))
     .modelBaseUrl("https://api.openai.com/v1")
+    .build();
+```
+
+Use `modelProvider("ark")` only when you want the Ark-specific `ArkLlm` adapter:
+
+```java
+Agent agent = Agent.builder()
+    .name("ark-agent")
+    .modelProvider("ark")
+    .model("doubao-seed-2-1-pro-260628")
+    .modelApiKey(System.getenv("MODEL_AGENT_API_KEY"))
+    .modelApiBase("https://ark.cn-beijing.volces.com/api/v3")
     .build();
 ```
 
