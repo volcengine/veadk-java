@@ -70,7 +70,7 @@ System.out.println(metadata.tools());
 For a simple blocking interaction, use the VeADK runner convenience API:
 
 ```java
-import com.volcengine.veadk.runner.Runner;
+import com.volcengine.veadk.Runner;
 
 String answer = new Runner(agent).run("Hello");
 ```

@@ -67,7 +67,7 @@ System.out.println(metadata.tools());
 如果需要简单的阻塞式交互入口，可以使用 VeADK runner 便捷 API：
 
 ```java
-import com.volcengine.veadk.runner.Runner;
+import com.volcengine.veadk.Runner;
 
 String answer = new Runner(agent).run("你好");
 ```

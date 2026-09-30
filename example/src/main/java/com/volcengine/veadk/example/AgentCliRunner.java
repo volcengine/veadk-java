@@ -22,7 +22,7 @@ import com.google.adk.events.Event;
 import com.google.adk.sessions.Session;
 import com.google.genai.types.Content;
 import com.google.genai.types.Part;
-import com.volcengine.veadk.runner.Runner;
+import com.volcengine.veadk.Runner;
 import io.reactivex.rxjava3.core.Flowable;
 import java.util.Scanner;
 
