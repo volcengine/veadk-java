@@ -23,6 +23,7 @@ import com.volcengine.model.Credentials;
 import com.volcengine.model.ServiceInfo;
 import com.volcengine.model.response.RawResponse;
 import com.volcengine.service.BaseServiceImpl;
+import com.volcengine.veadk.integration.viking.VikingDataPlaneException;
 import com.volcengine.veadk.utils.JSONUtil;
 import java.io.IOException;
 import java.util.ArrayList;
@@ -135,9 +136,16 @@ public class VikingKnowledgebaseWrapper extends BaseServiceImpl {
             };
 
     public VikingKnowledgebaseWrapper(String accessKey, String secretKey) {
+        this(accessKey, secretKey, null);
+    }
+
+    public VikingKnowledgebaseWrapper(String accessKey, String secretKey, String sessionToken) {
         super(SERVICE_INFO, API_INFO_LIST);
         setAccessKey(accessKey);
         setSecretKey(secretKey);
+        if (sessionToken != null) {
+            setSessionToken(sessionToken);
+        }
     }
 
     public boolean isCollectionExists(String collectionName) {
@@ -266,17 +274,9 @@ public class VikingKnowledgebaseWrapper extends BaseServiceImpl {
             RawResponse response = json("SearchKnowledge", null, bodyStr);
 
             if (response.getCode() != SdkError.SUCCESS.getNumber()) {
-                log.error(
-                        "SearchKnowledge request:{}, raw response:{}",
-                        bodyStr,
-                        response.getException());
-                return Collections.emptyList();
+                throw new VikingDataPlaneException(
+                        "SearchKnowledge", response.getCode(), "unknown", null, null);
             }
-
-            log.debug(
-                    "SearchKnowledge request:{}, raw response:{}",
-                    bodyStr,
-                    JSONUtil.parseJson(response.getData()));
 
             JsonNode rootNode = JSONUtil.parseJson(response.getData());
             JsonNode resultList = rootNode.path("data").path("result_list");
@@ -304,8 +304,7 @@ public class VikingKnowledgebaseWrapper extends BaseServiceImpl {
             }
             return entries;
         } catch (IOException e) {
-            log.error("searchKnowledge failed", e);
-            return Collections.emptyList();
+            throw new VikingDataPlaneException("SearchKnowledge", null, "unknown", null, e);
         }
     }
 }

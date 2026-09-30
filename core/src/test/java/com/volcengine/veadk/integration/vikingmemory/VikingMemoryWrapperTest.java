@@ -2,6 +2,7 @@ package com.volcengine.veadk.integration.vikingmemory;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.isNull;
@@ -19,6 +20,12 @@ import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 
 class VikingMemoryWrapperTest {
+
+    @Test
+    void constructor_setsOptionalSessionToken() {
+        VikingMemoryWrapper wrapper = new VikingMemoryWrapper("ak", "sk", "session-token");
+        assertEquals("session-token", wrapper.getSessionToken());
+    }
 
     private VikingMemoryWrapper vikingMemoryWrapper;
 
@@ -109,7 +116,7 @@ class VikingMemoryWrapperTest {
     }
 
     @Test
-    void addSession_false() throws Exception {
+    void addSession_errorThrows() throws Exception {
         RawResponse mockResponse =
                 new RawResponse(
                         null, SdkError.EHTTP.getNumber(), new Exception("add session failed"));
@@ -118,7 +125,9 @@ class VikingMemoryWrapperTest {
         List<Message> messages = Collections.singletonList(new Message("user", "hello"));
         Metadata metadata = new Metadata("u1", "a1", System.currentTimeMillis());
 
-        assertFalse(vikingMemoryWrapper.addSession("test-collection", messages, metadata));
+        assertThrows(
+                RuntimeException.class,
+                () -> vikingMemoryWrapper.addSession("test-collection", messages, metadata));
     }
 
     @Test
@@ -138,19 +147,20 @@ class VikingMemoryWrapperTest {
     }
 
     @Test
-    void searchMemory_empty_on_error() throws Exception {
+    void searchMemory_errorThrows() throws Exception {
         RawResponse mockResponse =
                 new RawResponse(null, SdkError.EHTTP.getNumber(), new Exception("search failed"));
         when(vikingMemoryWrapper.json(anyString(), isNull(), anyString())).thenReturn(mockResponse);
 
-        List<com.google.adk.memory.MemoryEntry> result =
-                vikingMemoryWrapper.searchMemory(
-                        "test-collection",
-                        "user-1",
-                        "query",
-                        2,
-                        Collections.singletonList("sys_event_v1"));
-        assertTrue(result.isEmpty());
+        assertThrows(
+                RuntimeException.class,
+                () ->
+                        vikingMemoryWrapper.searchMemory(
+                                "test-collection",
+                                "user-1",
+                                "query",
+                                2,
+                                Collections.singletonList("sys_event_v1")));
     }
 
     @Test

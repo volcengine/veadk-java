@@ -144,6 +144,17 @@ export MODEL_AGENT_API_KEY="<your-ark-api-key>"
 - 如果需要使用web search、viking memory、viking knowledgebase，需要配置环境变化：
   - VOLCENGINE_ACCESS_KEY：火山引擎AccessKey
   - VOLCENGINE_SECRET_KEY：火山引擎SecretKey
+- Viking 数据面也支持 API Key。显式 builder/config 参数优先于环境变量；空白、`none`、`null` 会视为未配置并回退环境变量：
+  - `DATABASE_VIKING_API_KEY`：KnowledgeBase 搜索 API Key
+  - `DATABASE_VIKINGMEM_API_KEY`：Memory 添加/查询 API Key
+  - `DATABASE_VIKING_PROJECT` / `DATABASE_VIKINGMEM_PROJECT`：项目名，默认 `default`
+  - `DATABASE_VIKING_REGION`（其次 `REGION`）：区域，默认 `cn-beijing`
+  - `DATABASE_VIKING_RESOURCE_ID`：可选 KnowledgeBase 资源 ID
+  - `DATABASE_VIKING_VERSION`：管理版本，默认 `2`
+  - `DATABASE_VIKING_BASE_URL` / `DATABASE_VIKINGMEM_BASE_URL`：可选 endpoint 覆盖
+  - `DATABASE_VIKINGMEM_MEMORY_TYPE`：逗号分隔的记忆类型，默认 `sys_event_v1,sys_profile_v1`
+  - `AGENTKIT_CLOUD_PROVIDER`（其次 `CLOUD_PROVIDER`）：默认 `volcengine`；`byteplus` 使用受支持的 `cn-hongkong` endpoint，并通过 `BYTEPLUS_ACCESS_KEY` / `BYTEPLUS_SECRET_KEY` / `BYTEPLUS_SESSION_TOKEN` 执行管理操作
+- 仅 API Key 模式要求 collection 已存在，并跳过 collection 管理预检；collection/文档管理仍需 AK/SK 或 IAM。数据面 API Key 请求失败时不会自动回退 AK/SK。配置示例请使用 `<your-viking-api-key>` 等明显占位符。
 - 如果需要使用 Mem0 Memory，可以直接配置 Mem0 API Key：
   - `DATABASE_MEM0_API_KEY`：Mem0 API Key
   - `DATABASE_MEM0_BASE_URL`：Mem0 服务地址，例如 `https://api.mem0.ai`

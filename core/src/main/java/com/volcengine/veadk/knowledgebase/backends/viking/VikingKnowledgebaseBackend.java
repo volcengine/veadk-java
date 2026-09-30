@@ -15,9 +15,11 @@
  */
 package com.volcengine.veadk.knowledgebase.backends.viking;
 
+import com.volcengine.veadk.integration.vikingknowledgebase.VikingKnowledgebaseApiKeyClient;
 import com.volcengine.veadk.integration.vikingknowledgebase.VikingKnowledgebaseWrapper;
 import com.volcengine.veadk.knowledgebase.KnowledgebaseEntry;
 import com.volcengine.veadk.knowledgebase.backends.BaseKnowledgebaseBackend;
+import com.volcengine.veadk.utils.EnvUtil;
 import java.io.IOException;
 import java.util.List;
 import java.util.Map;
@@ -26,20 +28,51 @@ import org.apache.commons.lang3.StringUtils;
 public class VikingKnowledgebaseBackend implements BaseKnowledgebaseBackend {
 
     private final String collectionName;
-    private final VikingKnowledgebaseWrapper wrapper;
+    private final VikingKnowledgebaseWrapper managementClient;
+    private final VikingKnowledgebaseWrapper signedDataClient;
+    private final VikingKnowledgebaseApiKeyClient apiKeyDataClient;
     private final boolean rerank;
     private final int chunkDiffusionCount;
 
     public VikingKnowledgebaseBackend(String collectionName) {
-        this(validateCollectionName(collectionName), VikingKnowledgebaseConfig.fromEnv());
+        this(validateCollectionName(collectionName), defaultConfig());
+    }
+
+    private static VikingKnowledgebaseConfig defaultConfig() {
+        if (StringUtils.isNotBlank(System.getenv("DATABASE_VIKING_API_KEY"))) {
+            return VikingKnowledgebaseConfig.fromEnv();
+        }
+        return VikingKnowledgebaseConfig.builder()
+                .accessKey(EnvUtil.getAccessKey())
+                .secretKey(EnvUtil.getSecretKey())
+                .build();
     }
 
     public VikingKnowledgebaseBackend(String collectionName, VikingKnowledgebaseConfig config) {
-        this(
-                validateCollectionName(collectionName),
-                new VikingKnowledgebaseWrapper(config.getAccessKey(), config.getSecretKey()),
-                config.isRerank(),
-                config.getChunkDiffusionCount());
+        this.collectionName = validateCollectionName(collectionName);
+        this.rerank = config.isRerank();
+        this.chunkDiffusionCount = config.getChunkDiffusionCount();
+        this.apiKeyDataClient =
+                config.hasApiKey()
+                        ? new VikingKnowledgebaseApiKeyClient(
+                                config.getApiKey(),
+                                config.getBaseUrl(),
+                                config.getProject(),
+                                config.getResourceId())
+                        : null;
+        if (!config.hasApiKey() && !config.hasManagementCredentials()) {
+            throw new IllegalStateException(
+                    "Viking management credentials are required when API Key is not configured.");
+        }
+        this.managementClient =
+                config.hasManagementCredentials()
+                        ? new VikingKnowledgebaseWrapper(
+                                config.getAccessKey(),
+                                config.getSecretKey(),
+                                config.getSessionToken())
+                        : null;
+        this.signedDataClient = config.hasApiKey() ? null : managementClient;
+        if (managementClient != null) ensureCollection();
     }
 
     VikingKnowledgebaseBackend(
@@ -48,7 +81,9 @@ public class VikingKnowledgebaseBackend implements BaseKnowledgebaseBackend {
             boolean rerank,
             int chunkDiffusionCount) {
         this.collectionName = collectionName;
-        this.wrapper = wrapper;
+        this.managementClient = wrapper;
+        this.signedDataClient = wrapper;
+        this.apiKeyDataClient = null;
         this.rerank = rerank;
         this.chunkDiffusionCount = chunkDiffusionCount;
         precheckIndexNaming();
@@ -62,7 +97,11 @@ public class VikingKnowledgebaseBackend implements BaseKnowledgebaseBackend {
 
     @Override
     public boolean addDoc(String tosUrl) {
-        return wrapper.addDoc(collectionName, tosUrl);
+        if (managementClient == null) {
+            throw new IllegalStateException(
+                    "Viking management credentials are required for document management.");
+        }
+        return managementClient.addDoc(collectionName, tosUrl);
     }
 
     @Override
@@ -70,16 +109,18 @@ public class VikingKnowledgebaseBackend implements BaseKnowledgebaseBackend {
         if (StringUtils.isBlank(query)) {
             return List.of();
         }
-        return wrapper
-                .searchKnowledge(collectionName, query, topK, null, rerank, chunkDiffusionCount)
-                .stream()
-                .map(VikingKnowledgebaseBackend::toKnowledgebaseEntry)
-                .toList();
+        List<com.volcengine.veadk.integration.vikingknowledgebase.KnowledgebaseEntry> results =
+                apiKeyDataClient != null
+                        ? apiKeyDataClient.searchKnowledge(
+                                collectionName, query, topK, null, rerank, chunkDiffusionCount)
+                        : signedDataClient.searchKnowledge(
+                                collectionName, query, topK, null, rerank, chunkDiffusionCount);
+        return results.stream().map(VikingKnowledgebaseBackend::toKnowledgebaseEntry).toList();
     }
 
     private void ensureCollection() {
-        if (!wrapper.isCollectionExists(collectionName)) {
-            wrapper.createCollection(collectionName);
+        if (!managementClient.isCollectionExists(collectionName)) {
+            managementClient.createCollection(collectionName);
         }
     }
 

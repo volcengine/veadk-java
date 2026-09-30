@@ -2,6 +2,7 @@ package com.volcengine.veadk.integration.vikingknowledgebase;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.isNull;
@@ -18,6 +19,13 @@ import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 
 class VikingKnowledgebaseWrapperTest {
+
+    @Test
+    void constructor_setsOptionalSessionToken() {
+        VikingKnowledgebaseWrapper wrapper =
+                new VikingKnowledgebaseWrapper("ak", "sk", "session-token");
+        assertEquals("session-token", wrapper.getSessionToken());
+    }
 
     private VikingKnowledgebaseWrapper vikingKnowledgebaseWrapper;
 
@@ -121,15 +129,16 @@ class VikingKnowledgebaseWrapperTest {
     }
 
     @Test
-    void searchKnowledge_empty() throws Exception {
+    void searchKnowledge_errorThrows() throws Exception {
         RawResponse mockResponse =
                 new RawResponse(null, SdkError.EHTTP.getNumber(), new Exception("search failed"));
         when(vikingKnowledgebaseWrapper.json(anyString(), isNull(), anyString()))
                 .thenReturn(mockResponse);
 
-        List<KnowledgebaseEntry> result =
-                vikingKnowledgebaseWrapper.searchKnowledge(
-                        "test-collection", "query", 1, new HashMap<>(), false, 0);
-        assertTrue(result.isEmpty());
+        assertThrows(
+                RuntimeException.class,
+                () ->
+                        vikingKnowledgebaseWrapper.searchKnowledge(
+                                "test-collection", "query", 1, new HashMap<>(), false, 0));
     }
 }

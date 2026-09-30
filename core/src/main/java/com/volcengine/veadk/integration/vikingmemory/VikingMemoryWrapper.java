@@ -26,6 +26,7 @@ import com.volcengine.model.Credentials;
 import com.volcengine.model.ServiceInfo;
 import com.volcengine.model.response.RawResponse;
 import com.volcengine.service.BaseServiceImpl;
+import com.volcengine.veadk.integration.viking.VikingDataPlaneException;
 import com.volcengine.veadk.utils.JSONUtil;
 import java.io.IOException;
 import java.util.ArrayList;
@@ -136,9 +137,16 @@ public class VikingMemoryWrapper extends BaseServiceImpl {
             };
 
     public VikingMemoryWrapper(String accessKey, String secretKey) {
+        this(accessKey, secretKey, null);
+    }
+
+    public VikingMemoryWrapper(String accessKey, String secretKey, String sessionToken) {
         super(SERVICE_INFO, API_INFO_LIST);
         setAccessKey(accessKey);
         setSecretKey(secretKey);
+        if (sessionToken != null) {
+            setSessionToken(sessionToken);
+        }
     }
 
     public boolean isCollectionExists(String collectionName) {
@@ -215,13 +223,9 @@ public class VikingMemoryWrapper extends BaseServiceImpl {
 
         RawResponse response = json("AddSession", null, bodyStr);
         if (response.getCode() != SdkError.SUCCESS.getNumber()) {
-            log.error("AddSession request:{}, raw response:{}", bodyStr, response.getException());
-            return false;
+            throw new VikingDataPlaneException(
+                    "AddSession", response.getCode(), "unknown", null, null);
         }
-        log.debug(
-                "AddSession request:{}, raw response:{}",
-                bodyStr,
-                JSONUtil.parseJson(response.getData()));
 
         JsonNode rootNode = JSONUtil.parseJson(response.getData());
         JsonNode sessionIdNode = rootNode.path("data").path("session_id");
@@ -245,13 +249,9 @@ public class VikingMemoryWrapper extends BaseServiceImpl {
 
         RawResponse response = json("SearchMemory", null, bodyStr);
         if (response.getCode() != SdkError.SUCCESS.getNumber()) {
-            log.error("SearchMemory request:{}, raw response:{}", bodyStr, response.getException());
-            return Collections.emptyList();
+            throw new VikingDataPlaneException(
+                    "SearchMemory", response.getCode(), "unknown", null, null);
         }
-        log.debug(
-                "SearchMemory request:{}, raw response:{}",
-                bodyStr,
-                JSONUtil.parseJson(response.getData()));
 
         JsonNode rootNode = JSONUtil.parseJson(response.getData());
         JsonNode resultList = rootNode.path("data").path("result_list");

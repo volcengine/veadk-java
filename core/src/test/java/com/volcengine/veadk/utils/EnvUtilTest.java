@@ -8,6 +8,23 @@ import org.junitpioneer.jupiter.ClearEnvironmentVariable;
 import org.junitpioneer.jupiter.SetEnvironmentVariable;
 
 class EnvUtilTest {
+    @Test
+    void normalizeTreatsBlankAndSentinelsAsMissing() {
+        assertThat(EnvUtil.normalize(" value ")).isEqualTo("value");
+        assertThat(EnvUtil.normalize(" None ")).isNull();
+        assertThat(EnvUtil.normalize("null")).isNull();
+        assertThat(EnvUtil.normalize("  ")).isNull();
+    }
+
+    @Test
+    @SetEnvironmentVariable(key = "DATABASE_VIKING_API_KEY", value = "env-key")
+    void resolveUsesExplicitThenEnvironmentThenDefault() {
+        assertThat(EnvUtil.resolve("explicit", "DATABASE_VIKING_API_KEY", "default"))
+                .isEqualTo("explicit");
+        assertThat(EnvUtil.resolve("none", "DATABASE_VIKING_API_KEY", "default"))
+                .isEqualTo("env-key");
+        assertThat(EnvUtil.resolve(null, "MISSING_TEST_VALUE", "default")).isEqualTo("default");
+    }
 
     @Test
     @SetEnvironmentVariable(key = "MODEL_AGENT_API_KEY", value = "test_api_key")
@@ -96,7 +113,7 @@ class EnvUtilTest {
     @Test
     @ClearEnvironmentVariable(key = "DATABASE_VIKINGMEM_MEMORY_TYPE")
     void getVikingMmemoryType_withMissingEnv_shouldReturnDefault() {
-        assertThat(EnvUtil.getVikingMmemoryType()).isEqualTo("sys_event_v1");
+        assertThat(EnvUtil.getVikingMmemoryType()).isEqualTo("sys_event_v1,sys_profile_v1");
     }
 
     @Test

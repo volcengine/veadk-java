@@ -1,7 +1,9 @@
 package com.volcengine.veadk.memory.viking;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
@@ -24,6 +26,30 @@ import org.mockito.MockedStatic;
 import org.mockito.Mockito;
 
 class VikingMemoryServiceTest {
+    @Test
+    void constructor_apiKeyOnly_skipsManagementPrecheck() {
+        VikingMemoryConfig config =
+                VikingMemoryConfig.builder()
+                        .apiKey("fake-key")
+                        .baseUrl("https://example.com")
+                        .build();
+        try (MockedConstruction<VikingMemoryWrapper> mockedCtor =
+                Mockito.mockConstruction(VikingMemoryWrapper.class)) {
+            new VikingMemoryService("AppMem", config);
+            assertEquals(0, mockedCtor.constructed().size());
+        }
+    }
+
+    @Test
+    void normalizeSessionId_preservesValidOmitsBlankAndHashesInvalid() {
+        assertEquals("A", VikingMemoryService.normalizeSessionId("A"));
+        assertEquals("A".repeat(128), VikingMemoryService.normalizeSessionId("A".repeat(128)));
+        assertEquals(null, VikingMemoryService.normalizeSessionId(" "));
+        String first = VikingMemoryService.normalizeSessionId("9/invalid");
+        assertTrue(first.matches("s_[0-9a-f]{64}"));
+        assertEquals(first, VikingMemoryService.normalizeSessionId("9/invalid"));
+        assertNotEquals(first, VikingMemoryService.normalizeSessionId("9/other"));
+    }
 
     @Test
     void constructor_invalidAppName_shouldThrow_and_notConstructWrapper() {

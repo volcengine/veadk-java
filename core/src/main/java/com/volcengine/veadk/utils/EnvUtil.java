@@ -22,6 +22,10 @@ public class EnvUtil {
     // env
     private static final String VOLCENGINE_ACCESS_KEY = "VOLCENGINE_ACCESS_KEY";
     private static final String VOLCENGINE_SECRET_KEY = "VOLCENGINE_SECRET_KEY";
+    private static final String VOLCENGINE_SESSION_TOKEN = "VOLCENGINE_SESSION_TOKEN";
+    private static final String BYTEPLUS_ACCESS_KEY = "BYTEPLUS_ACCESS_KEY";
+    private static final String BYTEPLUS_SECRET_KEY = "BYTEPLUS_SECRET_KEY";
+    private static final String BYTEPLUS_SESSION_TOKEN = "BYTEPLUS_SESSION_TOKEN";
     private static final String TLS_ENDPOINT = "OBSERVABILITY_OPENTELEMETRY_TLS_ENDPOINT";
     private static final String TLS_SERVICE_NAME = "OBSERVABILITY_OPENTELEMETRY_TLS_SERVICE_NAME";
     private static final String TLS_REGION = "OBSERVABILITY_OPENTELEMETRY_TLS_REGION";
@@ -42,7 +46,7 @@ public class EnvUtil {
     // default value
     private static final String DEFAULT_TLS_ENDPONT = "https://tls-cn-beijing.volces.com:4317";
     private static final String DEFAULT_TLS_REGION = "cn-beijing";
-    private static final String DEFAULT_VIKING_MEMORY_TYPE = "sys_event_v1";
+    private static final String DEFAULT_VIKING_MEMORY_TYPE = "sys_event_v1,sys_profile_v1";
     private static final String DEFAULT_AGENTKIT_SERVICE = "agentkit";
     private static final String DEFAULT_AGENTKIT_REGION = "cn-beijing";
     private static final String DEFAULT_MEM0_BASE_URL = "https://api.mem0.ai";
@@ -97,6 +101,53 @@ public class EnvUtil {
             throw getIllegalStateException(VOLCENGINE_SECRET_KEY);
         }
         return secretKey;
+    }
+
+    public static String getOptionalEnv(String name) {
+        return normalize(System.getenv(name));
+    }
+
+    public static String resolve(
+            String explicitValue, String environmentName, String defaultValue) {
+        String explicit = normalize(explicitValue);
+        if (explicit != null) {
+            return explicit;
+        }
+        String environment = getOptionalEnv(environmentName);
+        return environment == null ? defaultValue : environment;
+    }
+
+    public static String normalize(String value) {
+        if (value == null) {
+            return null;
+        }
+        String normalized = value.trim();
+        return normalized.isEmpty()
+                        || "none".equalsIgnoreCase(normalized)
+                        || "null".equalsIgnoreCase(normalized)
+                ? null
+                : normalized;
+    }
+
+    public static String getCloudAccessKey(String cloudProvider) {
+        return getOptionalEnv(
+                "byteplus".equalsIgnoreCase(cloudProvider)
+                        ? BYTEPLUS_ACCESS_KEY
+                        : VOLCENGINE_ACCESS_KEY);
+    }
+
+    public static String getCloudSecretKey(String cloudProvider) {
+        return getOptionalEnv(
+                "byteplus".equalsIgnoreCase(cloudProvider)
+                        ? BYTEPLUS_SECRET_KEY
+                        : VOLCENGINE_SECRET_KEY);
+    }
+
+    public static String getCloudSessionToken(String cloudProvider) {
+        return getOptionalEnv(
+                "byteplus".equalsIgnoreCase(cloudProvider)
+                        ? BYTEPLUS_SESSION_TOKEN
+                        : VOLCENGINE_SESSION_TOKEN);
     }
 
     public static String getRegion() {

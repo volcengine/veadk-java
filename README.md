@@ -149,6 +149,17 @@ Start command:
 - If you need `web search`, `Viking Memory`, or `Viking Knowledgebase`, configure these environment variables:
   - `VOLCENGINE_ACCESS_KEY`: Volcengine AccessKey
   - `VOLCENGINE_SECRET_KEY`: Volcengine SecretKey
+- Viking data-plane requests can instead use API Keys. Explicit builder/config values take precedence over environment variables; blank, `none`, and `null` values fall back to the environment:
+  - `DATABASE_VIKING_API_KEY`: KnowledgeBase search API Key
+  - `DATABASE_VIKINGMEM_API_KEY`: Memory add/search API Key
+  - `DATABASE_VIKING_PROJECT` / `DATABASE_VIKINGMEM_PROJECT`: project, default `default`
+  - `DATABASE_VIKING_REGION` (then `REGION`): region, default `cn-beijing`
+  - `DATABASE_VIKING_RESOURCE_ID`: optional KnowledgeBase resource ID
+  - `DATABASE_VIKING_VERSION`: management version, default `2`
+  - `DATABASE_VIKING_BASE_URL` / `DATABASE_VIKINGMEM_BASE_URL`: optional endpoint overrides
+  - `DATABASE_VIKINGMEM_MEMORY_TYPE`: comma-separated memory types, default `sys_event_v1,sys_profile_v1`
+  - `AGENTKIT_CLOUD_PROVIDER` (then `CLOUD_PROVIDER`): `volcengine` by default; `byteplus` uses the supported `cn-hongkong` endpoint and `BYTEPLUS_ACCESS_KEY` / `BYTEPLUS_SECRET_KEY` / `BYTEPLUS_SESSION_TOKEN` for management operations
+- API Key-only mode requires an existing collection and skips collection management checks. Collection/document management still requires AK/SK or IAM. Data-plane API Key failures do not fall back to AK/SK. Use placeholders such as `<your-viking-api-key>` in configuration.
 - If you need `Mem0 Memory`, configure either a direct Mem0 API key:
   - `DATABASE_MEM0_API_KEY`: Mem0 API Key
   - `DATABASE_MEM0_BASE_URL`: Mem0 endpoint, for example `https://api.mem0.ai`

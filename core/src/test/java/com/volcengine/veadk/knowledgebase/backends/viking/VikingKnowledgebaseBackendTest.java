@@ -76,6 +76,32 @@ class VikingKnowledgebaseBackendTest {
     }
 
     @Test
+    void constructor_apiKeyOnly_skipsManagementPrecheck() {
+        VikingKnowledgebaseConfig config =
+                VikingKnowledgebaseConfig.builder()
+                        .apiKey("fake-key")
+                        .baseUrl("https://example.com")
+                        .build();
+        try (MockedConstruction<VikingKnowledgebaseWrapper> mockedCtor =
+                Mockito.mockConstruction(VikingKnowledgebaseWrapper.class)) {
+            new VikingKnowledgebaseBackend("KbApp", config);
+            assertEquals(0, mockedCtor.constructed().size());
+        }
+    }
+
+    @Test
+    void addDoc_apiKeyOnly_requiresManagementCredentials() {
+        VikingKnowledgebaseBackend backend =
+                new VikingKnowledgebaseBackend(
+                        "KbApp",
+                        VikingKnowledgebaseConfig.builder()
+                                .apiKey("fake-key")
+                                .baseUrl("https://example.com")
+                                .build());
+        assertThrows(IllegalStateException.class, () -> backend.addDoc("tos://bucket/file"));
+    }
+
+    @Test
     void search_convertsVikingEntriesToCommonEntries() throws IOException {
         VikingKnowledgebaseWrapper wrapper = Mockito.mock(VikingKnowledgebaseWrapper.class);
         when(wrapper.isCollectionExists("KbApp")).thenReturn(true);
