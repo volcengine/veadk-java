@@ -41,6 +41,7 @@ public class AgentExample {
                                 getCurrentTime tool before answering.
                                 Answer in the user's language.
                                 """)
+                        .modelProvider("ark")
                         .model(MODEL_NAME)
                         .tools(FunctionTool.create(AgentExample.class, "getCurrentTime"))
                         .build();

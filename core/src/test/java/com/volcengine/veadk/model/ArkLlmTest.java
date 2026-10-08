@@ -95,6 +95,10 @@ class ArkLlmTest {
 
     @Test
     @ClearEnvironmentVariable(key = "MODEL_AGENT_API_KEY")
+    @ClearEnvironmentVariable(key = "MODEL_AGENT_API_KEY_ID")
+    @ClearEnvironmentVariable(key = "MODEL_AGENT_API_KEY_NAME")
+    @ClearEnvironmentVariable(key = "VOLCENGINE_ACCESS_KEY")
+    @ClearEnvironmentVariable(key = "VOLCENGINE_SECRET_KEY")
     void missingApiKeyFailsWithClearMessage() {
         IllegalStateException exception =
                 Assertions.assertThrows(

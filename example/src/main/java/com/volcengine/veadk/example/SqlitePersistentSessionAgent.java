@@ -19,26 +19,36 @@ import com.volcengine.veadk.Agent;
 import com.volcengine.veadk.Runner;
 import com.volcengine.veadk.memory.ShortTermMemory;
 
-/** Demonstrates session-scoped short-term memory with a stable user and session id. */
-public class ShortTermMemoryAgent {
+/** Demonstrates loading a persisted SQLite session from a fresh agent runner. */
+public class SqlitePersistentSessionAgent {
 
     private static final String MODEL_NAME = "doubao-seed-2-1-pro-260628";
+    private static final String APP_NAME = "sqlite_persistent_session_demo";
+    private static final String USER_ID = "user_1";
+    private static final String SESSION_ID = "session_1";
+    private static final String SQLITE_PATH = "./target/veadk-persistent-session.db";
 
     public static void main(String[] args) {
-        ShortTermMemory shortTermMemory = ShortTermMemory.builder().local().build();
+        Runner firstRunner = createRunner();
 
+        System.out.println("SQLite session database: " + SQLITE_PATH);
+        System.out.println(firstRunner.run(USER_ID, SESSION_ID, "我叫小明，我喜欢咖啡。请记住。"));
+
+        Runner freshRunner = createRunner();
+
+        System.out.println(freshRunner.run(USER_ID, SESSION_ID, "我叫什么？我喜欢什么？"));
+    }
+
+    private static Runner createRunner() {
+        ShortTermMemory shortTermMemory = ShortTermMemory.builder().sqlite(SQLITE_PATH).build();
         Agent agent =
                 Agent.builder()
-                        .name("short_term_memory_agent")
-                        .instruction("Remember facts the user tells you within this session.")
+                        .name("sqlite_persistent_session_agent")
+                        .instruction("Use the current session history to answer the user.")
                         .modelProvider("ark")
                         .modelName(MODEL_NAME)
                         .shortTermMemory(shortTermMemory)
                         .build();
-
-        Runner runner = new Runner(agent, "short_term_memory_demo");
-
-        System.out.println(runner.run("user_1", "session_1", "我叫小明。"));
-        System.out.println(runner.run("user_1", "session_1", "我叫什么？"));
+        return new Runner(agent, APP_NAME);
     }
 }

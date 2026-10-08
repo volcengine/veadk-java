@@ -19,25 +19,27 @@ import com.volcengine.veadk.Agent;
 import com.volcengine.veadk.Runner;
 import com.volcengine.veadk.memory.ShortTermMemory;
 
-/** Demonstrates session-scoped short-term memory with a stable user and session id. */
-public class ShortTermMemoryAgent {
+/** Demonstrates an agent backed by SQLite short-term memory. */
+public class SqliteShortTermMemoryAgent {
 
     private static final String MODEL_NAME = "doubao-seed-2-1-pro-260628";
+    private static final String SQLITE_PATH = "./target/veadk-short-term-memory.db";
 
     public static void main(String[] args) {
-        ShortTermMemory shortTermMemory = ShortTermMemory.builder().local().build();
+        ShortTermMemory shortTermMemory = ShortTermMemory.builder().sqlite(SQLITE_PATH).build();
 
         Agent agent =
                 Agent.builder()
-                        .name("short_term_memory_agent")
+                        .name("sqlite_short_term_memory_agent")
                         .instruction("Remember facts the user tells you within this session.")
                         .modelProvider("ark")
                         .modelName(MODEL_NAME)
                         .shortTermMemory(shortTermMemory)
                         .build();
 
-        Runner runner = new Runner(agent, "short_term_memory_demo");
+        Runner runner = new Runner(agent, "sqlite_short_term_memory_demo");
 
+        System.out.println("SQLite session database: " + SQLITE_PATH);
         System.out.println(runner.run("user_1", "session_1", "我叫小明。"));
         System.out.println(runner.run("user_1", "session_1", "我叫什么？"));
     }

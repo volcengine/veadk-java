@@ -16,14 +16,23 @@
 package com.volcengine.veadk.memory;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 
+import com.google.adk.events.Event;
 import com.google.adk.sessions.BaseSessionService;
 import com.google.adk.sessions.InMemorySessionService;
 import com.google.adk.sessions.Session;
+import com.google.genai.types.Content;
+import com.google.genai.types.Part;
+import io.reactivex.rxjava3.core.Completable;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 class ShortTermMemoryTest {
 
@@ -51,6 +60,66 @@ class ShortTermMemoryTest {
 
         assertThat(memory.backend()).isEqualTo(ShortTermMemory.Backend.CUSTOM);
         assertThat(memory.sessionService()).isSameAs(sessionService);
+    }
+
+    @Test
+    void unsupportedDatabaseBackendsFailFastUntilSessionServiceExists() {
+        assertThatThrownBy(
+                        () ->
+                                ShortTermMemory.builder()
+                                        .mysql("jdbc:mysql://localhost:3306/veadk")
+                                        .build())
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("MYSQL");
+
+        assertThatThrownBy(
+                        () ->
+                                ShortTermMemory.builder()
+                                        .postgresql("jdbc:postgresql://localhost:5432/veadk")
+                                        .build())
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("POSTGRESQL");
+    }
+
+    @Test
+    void databaseUrlInfersBackendBeforeFailFast() {
+        assertThatThrownBy(
+                        () ->
+                                ShortTermMemory.builder()
+                                        .databaseUrl("jdbc:postgresql://localhost:5432/veadk")
+                                        .build())
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("POSTGRESQL");
+    }
+
+    @Test
+    void sqliteBuilderUsesPersistentSessionService(@TempDir Path tempDir) {
+        Path dbPath = tempDir.resolve("memory.db");
+        ShortTermMemory firstMemory = ShortTermMemory.builder().sqlite(dbPath.toString()).build();
+
+        Session session = firstMemory.createSession("app", "user", "session").blockingGet();
+        firstMemory.sessionService().appendEvent(session, textEvent("hello")).blockingGet();
+
+        ShortTermMemory secondMemory = ShortTermMemory.builder().sqlite(dbPath.toString()).build();
+        Session loaded = secondMemory.getSession("app", "user", "session").blockingGet();
+
+        assertThat(secondMemory.backend()).isEqualTo(ShortTermMemory.Backend.SQLITE);
+        assertThat(secondMemory.sessionService()).isInstanceOf(SqliteSessionService.class);
+        assertThat(loaded.events()).hasSize(1);
+        assertThat(loaded.events().get(0).stringifyContent()).isEqualTo("hello");
+    }
+
+    @Test
+    void databaseUrlInfersSqliteBackend(@TempDir Path tempDir) {
+        Path dbPath = tempDir.resolve("memory.db");
+
+        ShortTermMemory memory =
+                ShortTermMemory.builder().databaseUrl("jdbc:sqlite:" + dbPath).build();
+        memory.createSession("app", "user", "session").blockingGet();
+
+        assertThat(memory.backend()).isEqualTo(ShortTermMemory.Backend.SQLITE);
+        assertThat(memory.sessionService()).isInstanceOf(SqliteSessionService.class);
+        assertThat(dbPath).exists();
     }
 
     @Test
@@ -98,5 +167,54 @@ class ShortTermMemoryTest {
 
         assertThat(found.id()).isEqualTo(session.id());
         assertThat(loaded.get().id()).isEqualTo(session.id());
+    }
+
+    @Test
+    void createSessionWaitsForAsyncCallbacks() {
+        List<String> calls = new ArrayList<>();
+        ShortTermMemory memory =
+                ShortTermMemory.builder()
+                        .afterCreateSessionCallback(
+                                session -> calls.add("create-sync:" + session.id()))
+                        .afterCreateSessionCallbackAsync(
+                                session ->
+                                        Completable.fromAction(
+                                                () -> calls.add("create-async:" + session.id())))
+                        .afterLoadMemoryCallback(session -> calls.add("load-sync:" + session.id()))
+                        .afterLoadMemoryCallbackAsync(
+                                session ->
+                                        Completable.fromAction(
+                                                () -> calls.add("load-async:" + session.id())))
+                        .build();
+
+        memory.createSession("app", "user", "session").blockingGet();
+        memory.createSession("app", "user", "session").blockingGet();
+
+        assertThat(calls)
+                .containsExactly(
+                        "create-sync:session",
+                        "create-async:session",
+                        "load-sync:session",
+                        "load-async:session");
+    }
+
+    @Test
+    void asyncCallbackErrorsPropagate() {
+        ShortTermMemory memory =
+                ShortTermMemory.builder()
+                        .afterCreateSessionCallbackAsync(
+                                session -> Completable.error(new IllegalStateException("boom")))
+                        .build();
+
+        assertThatThrownBy(() -> memory.createSession("app", "user", "session").blockingGet())
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("boom");
+    }
+
+    private static Event textEvent(String text) {
+        return Event.builder()
+                .author("user")
+                .content(Content.fromParts(Part.fromText(text)))
+                .build();
     }
 }

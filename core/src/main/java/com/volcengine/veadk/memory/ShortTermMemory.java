@@ -18,26 +18,39 @@ package com.volcengine.veadk.memory;
 import com.google.adk.sessions.BaseSessionService;
 import com.google.adk.sessions.InMemorySessionService;
 import com.google.adk.sessions.Session;
+import io.reactivex.rxjava3.core.Completable;
 import io.reactivex.rxjava3.core.Maybe;
 import io.reactivex.rxjava3.core.Single;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Consumer;
+import java.util.function.Function;
 
 /** Session-scoped memory backed by ADK Java's {@link BaseSessionService}. */
 public final class ShortTermMemory {
 
     private final Backend backend;
     private final BaseSessionService sessionService;
+    private final String dbUrl;
+    private final String localDatabasePath;
+    private final Map<String, Object> backendOptions;
     private final Consumer<Session> afterCreateSessionCallback;
     private final Consumer<Session> afterLoadMemoryCallback;
+    private final Function<Session, Completable> afterCreateSessionCallbackAsync;
+    private final Function<Session, Completable> afterLoadMemoryCallbackAsync;
 
     private ShortTermMemory(Builder builder) {
         this.backend = builder.backend;
-        this.sessionService = Objects.requireNonNull(builder.sessionService, "sessionService");
+        this.sessionService = builder.resolveSessionService();
+        this.dbUrl = Objects.requireNonNullElse(builder.dbUrl, "");
+        this.localDatabasePath = Objects.requireNonNullElse(builder.localDatabasePath, "");
+        this.backendOptions = Map.copyOf(builder.backendOptions);
         this.afterCreateSessionCallback = builder.afterCreateSessionCallback;
         this.afterLoadMemoryCallback = builder.afterLoadMemoryCallback;
+        this.afterCreateSessionCallbackAsync = builder.afterCreateSessionCallbackAsync;
+        this.afterLoadMemoryCallbackAsync = builder.afterLoadMemoryCallbackAsync;
     }
 
     public static Builder builder() {
@@ -56,6 +69,18 @@ public final class ShortTermMemory {
         return sessionService;
     }
 
+    public String dbUrl() {
+        return dbUrl;
+    }
+
+    public String localDatabasePath() {
+        return localDatabasePath;
+    }
+
+    public Map<String, Object> backendOptions() {
+        return backendOptions;
+    }
+
     public Maybe<Session> getSession(String appName, String userId, String sessionId) {
         return sessionService
                 .getSession(
@@ -63,7 +88,9 @@ public final class ShortTermMemory {
                         requireText(userId, "userId must be set."),
                         requireText(sessionId, "sessionId must be set."),
                         Optional.empty())
-                .doOnSuccess(this::runAfterLoadMemoryCallback);
+                .flatMap(
+                        session ->
+                                runAfterLoadMemoryCallback(session).andThen(Maybe.just(session)));
     }
 
     public Single<Session> createSession(String appName, String userId, String sessionId) {
@@ -72,7 +99,10 @@ public final class ShortTermMemory {
         if (!hasText(sessionId)) {
             return sessionService
                     .createSession(resolvedAppName, resolvedUserId, Map.of(), null)
-                    .doOnSuccess(this::runAfterCreateSessionCallback);
+                    .flatMap(
+                            session ->
+                                    runAfterCreateSessionCallback(session)
+                                            .andThen(Single.just(session)));
         }
         return getSession(resolvedAppName, resolvedUserId, sessionId)
                 .switchIfEmpty(
@@ -84,19 +114,45 @@ public final class ShortTermMemory {
                                                         resolvedUserId,
                                                         Map.of(),
                                                         sessionId)
-                                                .doOnSuccess(this::runAfterCreateSessionCallback)));
+                                                .flatMap(
+                                                        session ->
+                                                                runAfterCreateSessionCallback(
+                                                                                session)
+                                                                        .andThen(
+                                                                                Single.just(
+                                                                                        session)))));
     }
 
-    private void runAfterCreateSessionCallback(Session session) {
+    private Completable runAfterCreateSessionCallback(Session session) {
+        Completable callback = Completable.complete();
         if (afterCreateSessionCallback != null) {
-            afterCreateSessionCallback.accept(session);
+            callback =
+                    callback.andThen(
+                            Completable.fromAction(
+                                    () -> afterCreateSessionCallback.accept(session)));
         }
+        return callback.andThen(invokeAsyncCallback(afterCreateSessionCallbackAsync, session));
     }
 
-    private void runAfterLoadMemoryCallback(Session session) {
+    private Completable runAfterLoadMemoryCallback(Session session) {
+        Completable callback = Completable.complete();
         if (afterLoadMemoryCallback != null) {
-            afterLoadMemoryCallback.accept(session);
+            callback =
+                    callback.andThen(
+                            Completable.fromAction(() -> afterLoadMemoryCallback.accept(session)));
         }
+        return callback.andThen(invokeAsyncCallback(afterLoadMemoryCallbackAsync, session));
+    }
+
+    private static Completable invokeAsyncCallback(
+            Function<Session, Completable> callback, Session session) {
+        if (callback == null) {
+            return Completable.complete();
+        }
+        return Completable.defer(
+                () ->
+                        Objects.requireNonNull(
+                                callback.apply(session), "callback must return a Completable."));
     }
 
     private static boolean hasText(String text) {
@@ -112,19 +168,79 @@ public final class ShortTermMemory {
 
     public enum Backend {
         LOCAL,
+        SQLITE,
+        MYSQL,
+        POSTGRESQL,
+        DATABASE,
         CUSTOM
     }
 
     /** Builder for {@link ShortTermMemory}. */
     public static final class Builder {
+        private static final String DEFAULT_LOCAL_DATABASE_PATH = "/tmp/veadk_local_database.db";
+
         private Backend backend = Backend.LOCAL;
         private BaseSessionService sessionService = new InMemorySessionService();
+        private String dbUrl = "";
+        private String localDatabasePath = DEFAULT_LOCAL_DATABASE_PATH;
+        private Map<String, Object> backendOptions = new HashMap<>();
         private Consumer<Session> afterCreateSessionCallback;
         private Consumer<Session> afterLoadMemoryCallback;
+        private Function<Session, Completable> afterCreateSessionCallbackAsync;
+        private Function<Session, Completable> afterLoadMemoryCallbackAsync;
 
         public Builder local() {
             this.backend = Backend.LOCAL;
             this.sessionService = new InMemorySessionService();
+            return this;
+        }
+
+        public Builder sqlite() {
+            return sqlite(DEFAULT_LOCAL_DATABASE_PATH);
+        }
+
+        public Builder sqlite(String localDatabasePath) {
+            this.backend = Backend.SQLITE;
+            this.localDatabasePath =
+                    requireText(localDatabasePath, "localDatabasePath must be set.");
+            this.dbUrl =
+                    this.localDatabasePath.startsWith("jdbc:sqlite:")
+                            ? this.localDatabasePath
+                            : "jdbc:sqlite:" + this.localDatabasePath;
+            this.sessionService = null;
+            return this;
+        }
+
+        public Builder mysql(String dbUrl) {
+            this.backend = Backend.MYSQL;
+            this.dbUrl = requireText(dbUrl, "dbUrl must be set.");
+            this.sessionService = null;
+            return this;
+        }
+
+        public Builder postgresql(String dbUrl) {
+            this.backend = Backend.POSTGRESQL;
+            this.dbUrl = requireText(dbUrl, "dbUrl must be set.");
+            this.sessionService = null;
+            return this;
+        }
+
+        public Builder databaseUrl(String dbUrl) {
+            this.dbUrl = requireText(dbUrl, "dbUrl must be set.");
+            this.backend = inferBackend(this.dbUrl);
+            this.sessionService = null;
+            return this;
+        }
+
+        public Builder backendOption(String key, Object value) {
+            this.backendOptions.put(requireText(key, "key must be set."), value);
+            return this;
+        }
+
+        public Builder backendOptions(Map<String, Object> backendOptions) {
+            this.backendOptions =
+                    new HashMap<>(
+                            Objects.requireNonNull(backendOptions, "backendOptions must be set."));
             return this;
         }
 
@@ -141,14 +257,61 @@ public final class ShortTermMemory {
             return this;
         }
 
+        public Builder afterCreateSessionCallbackAsync(Function<Session, Completable> callback) {
+            this.afterCreateSessionCallbackAsync =
+                    Objects.requireNonNull(callback, "callback must be set.");
+            return this;
+        }
+
         public Builder afterLoadMemoryCallback(Consumer<Session> callback) {
             this.afterLoadMemoryCallback =
                     Objects.requireNonNull(callback, "callback must be set.");
             return this;
         }
 
+        public Builder afterLoadMemoryCallbackAsync(Function<Session, Completable> callback) {
+            this.afterLoadMemoryCallbackAsync =
+                    Objects.requireNonNull(callback, "callback must be set.");
+            return this;
+        }
+
         public ShortTermMemory build() {
             return new ShortTermMemory(this);
+        }
+
+        private BaseSessionService resolveSessionService() {
+            if (backend == Backend.LOCAL) {
+                return sessionService == null ? new InMemorySessionService() : sessionService;
+            }
+            if (backend == Backend.CUSTOM) {
+                return Objects.requireNonNull(sessionService, "sessionService must be set.");
+            }
+            if (backend == Backend.SQLITE) {
+                return new SqliteSessionService(hasText(dbUrl) ? dbUrl : localDatabasePath);
+            }
+            throw new UnsupportedOperationException(
+                    "ShortTermMemory backend "
+                            + backend
+                            + " is not supported yet. Provide a custom BaseSessionService via"
+                            + " sessionService(...) to use this backend.");
+        }
+
+        private static Backend inferBackend(String dbUrl) {
+            String normalized = dbUrl.trim().toLowerCase();
+            if (normalized.startsWith("sqlite:")
+                    || normalized.startsWith("jdbc:sqlite:")
+                    || normalized.endsWith(".db")) {
+                return Backend.SQLITE;
+            }
+            if (normalized.startsWith("mysql:") || normalized.startsWith("jdbc:mysql:")) {
+                return Backend.MYSQL;
+            }
+            if (normalized.startsWith("postgresql:")
+                    || normalized.startsWith("postgres:")
+                    || normalized.startsWith("jdbc:postgresql:")) {
+                return Backend.POSTGRESQL;
+            }
+            return Backend.DATABASE;
         }
     }
 }
