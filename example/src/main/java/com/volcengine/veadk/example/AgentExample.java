@@ -27,7 +27,7 @@ import java.util.Map;
 /** A minimal real Agent example backed by Ark and executed through Runner.run(...). */
 public class AgentExample {
 
-    private static final String MODEL_NAME = "doubao-seed-2-1-pro-260628";
+    private static final String MODEL_NAME = "deepseek-v4-flash-ga-260731";
 
     public static void main(String[] args) {
         Agent agent =

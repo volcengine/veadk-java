@@ -15,22 +15,16 @@
  */
 package com.volcengine.veadk.memory;
 
-import java.util.Objects;
+import java.util.Map;
 
-/** SQLite-backed session service for local persistent short-term memory. */
-public final class SqliteSessionService extends JdbcSessionService {
+/** MySQL-backed session service for persistent short-term memory. */
+public final class MySqlSessionService extends JdbcSessionService {
 
-    static final String JDBC_PREFIX = "jdbc:sqlite:";
-
-    public SqliteSessionService(String localDatabasePathOrJdbcUrl) {
-        super(toJdbcUrl(localDatabasePathOrJdbcUrl), Dialect.SQLITE);
+    public MySqlSessionService(String jdbcUrl) {
+        super(jdbcUrl, Dialect.MYSQL);
     }
 
-    private static String toJdbcUrl(String localDatabasePathOrJdbcUrl) {
-        String value = Objects.requireNonNull(localDatabasePathOrJdbcUrl, "database path is null");
-        if (value.startsWith(JDBC_PREFIX)) {
-            return value;
-        }
-        return JDBC_PREFIX + value;
+    public MySqlSessionService(String jdbcUrl, Map<String, ?> connectionProperties) {
+        super(jdbcUrl, Dialect.MYSQL, connectionProperties);
     }
 }

@@ -63,33 +63,44 @@ class ShortTermMemoryTest {
     }
 
     @Test
-    void unsupportedDatabaseBackendsFailFastUntilSessionServiceExists() {
-        assertThatThrownBy(
-                        () ->
-                                ShortTermMemory.builder()
-                                        .mysql("jdbc:mysql://localhost:3306/veadk")
-                                        .build())
-                .isInstanceOf(UnsupportedOperationException.class)
-                .hasMessageContaining("MYSQL");
+    void mysqlBuilderUsesPersistentSessionService() {
+        ShortTermMemory memory =
+                ShortTermMemory.builder()
+                        .mysql("jdbc:mysql://localhost:3306/veadk", "user", "password")
+                        .build();
 
-        assertThatThrownBy(
-                        () ->
-                                ShortTermMemory.builder()
-                                        .postgresql("jdbc:postgresql://localhost:5432/veadk")
-                                        .build())
-                .isInstanceOf(UnsupportedOperationException.class)
-                .hasMessageContaining("POSTGRESQL");
+        assertThat(memory.backend()).isEqualTo(ShortTermMemory.Backend.MYSQL);
+        assertThat(memory.sessionService()).isInstanceOf(MySqlSessionService.class);
+        assertThat(memory.backendOptions())
+                .containsEntry("user", "user")
+                .containsEntry("password", "password");
     }
 
     @Test
-    void databaseUrlInfersBackendBeforeFailFast() {
-        assertThatThrownBy(
-                        () ->
-                                ShortTermMemory.builder()
-                                        .databaseUrl("jdbc:postgresql://localhost:5432/veadk")
-                                        .build())
-                .isInstanceOf(UnsupportedOperationException.class)
-                .hasMessageContaining("POSTGRESQL");
+    void postgresqlBuilderUsesPersistentSessionService() {
+        ShortTermMemory memory =
+                ShortTermMemory.builder()
+                        .postgresql("jdbc:postgresql://localhost:5432/veadk", "user", "password")
+                        .build();
+
+        assertThat(memory.backend()).isEqualTo(ShortTermMemory.Backend.POSTGRESQL);
+        assertThat(memory.sessionService()).isInstanceOf(PostgresqlSessionService.class);
+        assertThat(memory.backendOptions())
+                .containsEntry("user", "user")
+                .containsEntry("password", "password");
+    }
+
+    @Test
+    void databaseUrlInfersPostgresqlBackend() {
+        ShortTermMemory memory =
+                ShortTermMemory.builder()
+                        .databaseUrl("jdbc:postgresql://localhost:5432/veadk")
+                        .backendOption("user", "user")
+                        .backendOption("password", "password")
+                        .build();
+
+        assertThat(memory.backend()).isEqualTo(ShortTermMemory.Backend.POSTGRESQL);
+        assertThat(memory.sessionService()).isInstanceOf(PostgresqlSessionService.class);
     }
 
     @Test

@@ -22,7 +22,7 @@ import com.volcengine.veadk.memory.ShortTermMemory;
 /** Demonstrates an agent backed by SQLite short-term memory. */
 public class SqliteShortTermMemoryAgent {
 
-    private static final String MODEL_NAME = "doubao-seed-2-1-pro-260628";
+    private static final String MODEL_NAME = "deepseek-v4-flash-ga-260731";
     private static final String SQLITE_PATH = "./target/veadk-short-term-memory.db";
 
     public static void main(String[] args) {

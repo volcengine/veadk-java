@@ -19,36 +19,48 @@ import com.volcengine.veadk.Agent;
 import com.volcengine.veadk.Runner;
 import com.volcengine.veadk.memory.ShortTermMemory;
 
-/** Demonstrates loading a persisted SQLite session from a fresh agent runner. */
-public class SqlitePersistentSessionAgent {
+/** Demonstrates loading a persisted PostgreSQL session from a fresh agent runner. */
+public class PostgresqlPersistentSessionAgent {
 
     private static final String MODEL_NAME = "deepseek-v4-flash-ga-260731";
-    private static final String APP_NAME = "sqlite_persistent_session_demo";
+    private static final String APP_NAME = "postgresql_persistent_session_demo";
     private static final String USER_ID = "user_1";
     private static final String SESSION_ID = "session_1";
-    private static final String SQLITE_PATH = "./target/veadk-persistent-session.db";
 
     public static void main(String[] args) {
-        Runner firstRunner = createRunner();
+        String jdbcUrl = requireEnv("POSTGRESQL_SESSION_JDBC_URL");
+        String username = requireEnv("POSTGRESQL_SESSION_USERNAME");
+        String password = requireEnv("POSTGRESQL_SESSION_PASSWORD");
 
-        System.out.println("SQLite session database: " + SQLITE_PATH);
+        Runner firstRunner = createRunner(jdbcUrl, username, password);
+
+        System.out.println("PostgreSQL session database: " + jdbcUrl);
         System.out.println(firstRunner.run(USER_ID, SESSION_ID, "我叫小明，我喜欢咖啡。请记住。"));
 
-        Runner freshRunner = createRunner();
+        Runner freshRunner = createRunner(jdbcUrl, username, password);
 
         System.out.println(freshRunner.run(USER_ID, SESSION_ID, "我叫什么？我喜欢什么？"));
     }
 
-    private static Runner createRunner() {
-        ShortTermMemory shortTermMemory = ShortTermMemory.builder().sqlite(SQLITE_PATH).build();
+    private static Runner createRunner(String jdbcUrl, String username, String password) {
+        ShortTermMemory shortTermMemory =
+                ShortTermMemory.builder().postgresql(jdbcUrl, username, password).build();
         Agent agent =
                 Agent.builder()
-                        .name("sqlite_persistent_session_agent")
+                        .name("postgresql_persistent_session_agent")
                         .instruction("Use the current session history to answer the user.")
                         .modelProvider("ark")
                         .modelName(MODEL_NAME)
                         .shortTermMemory(shortTermMemory)
                         .build();
         return new Runner(agent, APP_NAME);
+    }
+
+    private static String requireEnv(String name) {
+        String value = System.getenv(name);
+        if (value == null || value.isBlank()) {
+            throw new IllegalStateException("Missing required environment variable: " + name);
+        }
+        return value;
     }
 }

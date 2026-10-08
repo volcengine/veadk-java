@@ -218,6 +218,10 @@ public final class ShortTermMemory {
             return this;
         }
 
+        public Builder mysql(String dbUrl, String username, String password) {
+            return mysql(dbUrl).databaseCredentials(username, password);
+        }
+
         public Builder postgresql(String dbUrl) {
             this.backend = Backend.POSTGRESQL;
             this.dbUrl = requireText(dbUrl, "dbUrl must be set.");
@@ -225,10 +229,20 @@ public final class ShortTermMemory {
             return this;
         }
 
+        public Builder postgresql(String dbUrl, String username, String password) {
+            return postgresql(dbUrl).databaseCredentials(username, password);
+        }
+
         public Builder databaseUrl(String dbUrl) {
             this.dbUrl = requireText(dbUrl, "dbUrl must be set.");
             this.backend = inferBackend(this.dbUrl);
             this.sessionService = null;
+            return this;
+        }
+
+        public Builder databaseCredentials(String username, String password) {
+            backendOption("user", requireText(username, "username must be set."));
+            backendOption("password", requireText(password, "password must be set."));
             return this;
         }
 
@@ -288,6 +302,12 @@ public final class ShortTermMemory {
             }
             if (backend == Backend.SQLITE) {
                 return new SqliteSessionService(hasText(dbUrl) ? dbUrl : localDatabasePath);
+            }
+            if (backend == Backend.MYSQL) {
+                return new MySqlSessionService(dbUrl, backendOptions);
+            }
+            if (backend == Backend.POSTGRESQL) {
+                return new PostgresqlSessionService(dbUrl, backendOptions);
             }
             throw new UnsupportedOperationException(
                     "ShortTermMemory backend "
