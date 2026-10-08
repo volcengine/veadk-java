@@ -27,6 +27,12 @@ public class EnvUtil {
     private static final String TLS_REGION = "OBSERVABILITY_OPENTELEMETRY_TLS_REGION";
     private static final String VIKINGMEM_MEMORY_TYPE = "DATABASE_VIKINGMEM_MEMORY_TYPE";
     private static final String MODEL_AGENT_API_KEY = "MODEL_AGENT_API_KEY";
+    private static final String MODEL_AGENT_API_KEY_ID = "MODEL_AGENT_API_KEY_ID";
+    private static final String MODEL_AGENT_API_KEY_NAME = "MODEL_AGENT_API_KEY_NAME";
+    private static final String MODEL_AGENT_PROJECT_NAME = "MODEL_AGENT_PROJECT_NAME";
+    private static final String CLOUD_PROVIDER = "CLOUD_PROVIDER";
+    private static final String VOLCENGINE_SESSION_TOKEN = "VOLCENGINE_SESSION_TOKEN";
+    private static final String VOLC_SESSIONTOKEN = "VOLC_SESSIONTOKEN";
     private static final String TOOL_CODE_SANDBOX_URL = "TOOL_CODE_SANDBOX_URL";
     private static final String AGENTKIT_TOOL_ID = "AGENTKIT_TOOL_ID";
     private static final String AGENTKIT_TOOL_SERVICE = "AGENTKIT_TOOL_SERVICE_CODE";
@@ -45,6 +51,7 @@ public class EnvUtil {
     private static final String DEFAULT_VIKING_MEMORY_TYPE = "sys_event_v1";
     private static final String DEFAULT_AGENTKIT_SERVICE = "agentkit";
     private static final String DEFAULT_AGENTKIT_REGION = "cn-beijing";
+    private static final String DEFAULT_MODEL_AGENT_PROJECT_NAME = "default";
     private static final String DEFAULT_MEM0_BASE_URL = "https://api.mem0.ai";
 
     private EnvUtil() {}
@@ -83,6 +90,22 @@ public class EnvUtil {
         return apiKey;
     }
 
+    public static String getModelAgentApiKeyId() {
+        return StringUtils.trimToEmpty(System.getenv(MODEL_AGENT_API_KEY_ID));
+    }
+
+    public static String getModelAgentApiKeyName() {
+        return StringUtils.trimToEmpty(System.getenv(MODEL_AGENT_API_KEY_NAME));
+    }
+
+    public static String getModelAgentProjectName() {
+        String projectName = System.getenv(MODEL_AGENT_PROJECT_NAME);
+        if (StringUtils.isBlank(projectName)) {
+            return DEFAULT_MODEL_AGENT_PROJECT_NAME;
+        }
+        return projectName.trim();
+    }
+
     public static String getAccessKey() {
         String accessKey = System.getenv(VOLCENGINE_ACCESS_KEY);
         if (StringUtils.isBlank(accessKey)) {
@@ -97,6 +120,18 @@ public class EnvUtil {
             throw getIllegalStateException(VOLCENGINE_SECRET_KEY);
         }
         return secretKey;
+    }
+
+    public static String getSessionToken() {
+        String sessionToken = System.getenv(VOLCENGINE_SESSION_TOKEN);
+        if (StringUtils.isBlank(sessionToken)) {
+            sessionToken = System.getenv(VOLC_SESSIONTOKEN);
+        }
+        return StringUtils.defaultString(sessionToken).trim();
+    }
+
+    public static String getCloudProvider() {
+        return StringUtils.trimToEmpty(System.getenv(CLOUD_PROVIDER));
     }
 
     public static String getRegion() {

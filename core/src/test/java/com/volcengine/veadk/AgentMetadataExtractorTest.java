@@ -27,6 +27,7 @@ import com.google.adk.models.LlmResponse;
 import com.google.adk.tools.BaseTool;
 import com.google.adk.tools.ToolContext;
 import com.volcengine.veadk.knowledgebase.BaseKnowledgebaseService;
+import com.volcengine.veadk.memory.ShortTermMemory;
 import com.volcengine.veadk.utils.JSONUtil;
 import io.reactivex.rxjava3.core.Flowable;
 import io.reactivex.rxjava3.core.Single;
@@ -56,6 +57,7 @@ class AgentMetadataExtractorTest {
                         .subAgents(child)
                         .knowledgebase(mock(BaseKnowledgebaseService.class))
                         .longTermMemory(mock(BaseMemoryService.class))
+                        .shortTermMemory(ShortTermMemory.local())
                         .autoSaveSession(true)
                         .build();
 
@@ -86,6 +88,7 @@ class AgentMetadataExtractorTest {
         assertThat(metadata.subAgents().get(0).id()).isEqualTo("root_agent/child_agent");
         assertThat(component(metadata, "knowledgebase").enabled()).isTrue();
         assertThat(component(metadata, "longTermMemory").enabled()).isTrue();
+        assertThat(component(metadata, "shortTermMemory").enabled()).isTrue();
         assertThat(searchSource(metadata, "web").enabled()).isTrue();
         assertThat(searchSource(metadata, "knowledge").enabled()).isTrue();
         assertThat(searchSource(metadata, "memory").enabled()).isTrue();

@@ -33,11 +33,16 @@ import com.volcengine.veadk.knowledgebase.BaseKnowledgebaseService;
 import com.volcengine.veadk.knowledgebase.KnowledgebaseEntry;
 import com.volcengine.veadk.knowledgebase.SearchKnowledgebaseResponse;
 import com.volcengine.veadk.memory.SaveSessionToMemoryCallback;
+import com.volcengine.veadk.memory.ShortTermMemory;
 import com.volcengine.veadk.model.ArkLlm;
+import com.volcengine.veadk.model.ArkLlmConfig;
+import com.volcengine.veadk.model.ModelProvider;
+import com.volcengine.veadk.model.OpenAiCompatibleLlm;
 import com.volcengine.veadk.tools.knowledgebase.LoadKnowledgebaseTool;
 import io.reactivex.rxjava3.core.Flowable;
 import io.reactivex.rxjava3.core.Maybe;
 import io.reactivex.rxjava3.core.Single;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -48,6 +53,7 @@ class AgentTest {
 
     @Test
     @SetEnvironmentVariable(key = "MODEL_AGENT_API_KEY", value = "test-api-key")
+    @ClearEnvironmentVariable(key = "MODEL_AGENT_API_BASE")
     void buildWithoutOverridesUsesVeadkDefaults() {
         Agent agent = Agent.builder().build();
 
@@ -57,8 +63,11 @@ class AgentTest {
         assertThat(agent.metadataSnapshot().instructionSummary())
                 .isEqualTo(Agent.DEFAULT_INSTRUCTION);
         assertThat(agent.model()).isPresent();
-        assertThat(agent.model().orElseThrow().model().orElseThrow().model())
-                .isEqualTo(Agent.DEFAULT_MODEL_NAME);
+        OpenAiCompatibleLlm llm =
+                (OpenAiCompatibleLlm) agent.model().orElseThrow().model().orElseThrow();
+        assertThat(llm.model()).isEqualTo(Agent.DEFAULT_MODEL_NAME);
+        assertThat(llm.config().getApiKey()).isEqualTo("test-api-key");
+        assertThat(llm.config().getBaseUrl()).isEqualTo(ArkLlmConfig.DEFAULT_API_BASE);
     }
 
     @Test
@@ -99,7 +108,8 @@ class AgentTest {
 
     @Test
     @SetEnvironmentVariable(key = "MODEL_AGENT_API_KEY", value = "test-api-key")
-    void modelNameCreatesArkLlm() {
+    @SetEnvironmentVariable(key = "MODEL_AGENT_API_BASE", value = "https://default.example.com/v1")
+    void modelNameCreatesOpenAiCompatibleLlm() {
         Agent agent =
                 Agent.builder()
                         .name("model_name_agent")
@@ -108,14 +118,16 @@ class AgentTest {
 
         assertThat(agent.veadkModelName()).isEqualTo("doubao-seed-2-1-pro-260628");
         assertThat(agent.model()).isPresent();
-        assertThat(agent.model().orElseThrow().model().orElseThrow()).isInstanceOf(ArkLlm.class);
-        assertThat(agent.model().orElseThrow().model().orElseThrow().model())
-                .isEqualTo("doubao-seed-2-1-pro-260628");
+        OpenAiCompatibleLlm llm =
+                (OpenAiCompatibleLlm) agent.model().orElseThrow().model().orElseThrow();
+        assertThat(llm.model()).isEqualTo("doubao-seed-2-1-pro-260628");
+        assertThat(llm.config().getBaseUrl()).isEqualTo("https://default.example.com/v1");
     }
 
     @Test
     @ClearEnvironmentVariable(key = "MODEL_AGENT_API_KEY")
-    void modelApiKeyCreatesArkLlmWithoutEnv() {
+    @ClearEnvironmentVariable(key = "MODEL_AGENT_API_BASE")
+    void modelApiKeyCreatesOpenAiCompatibleLlmWithoutEnv() {
         Agent agent =
                 Agent.builder()
                         .name("explicit_key_agent")
@@ -124,14 +136,105 @@ class AgentTest {
                         .build();
 
         assertThat(agent.model()).isPresent();
-        assertThat(agent.model().orElseThrow().model().orElseThrow()).isInstanceOf(ArkLlm.class);
-        ArkLlm arkLlm = (ArkLlm) agent.model().orElseThrow().model().orElseThrow();
-        assertThat(arkLlm.config().getApiKey()).isEqualTo("explicit-api-key");
+        OpenAiCompatibleLlm llm =
+                (OpenAiCompatibleLlm) agent.model().orElseThrow().model().orElseThrow();
+        assertThat(llm.config().getApiKey()).isEqualTo("explicit-api-key");
+        assertThat(llm.config().getBaseUrl()).isEqualTo(ArkLlmConfig.DEFAULT_API_BASE);
     }
 
     @Test
     @ClearEnvironmentVariable(key = "MODEL_AGENT_API_KEY")
-    void modelNameAfterExplicitModelReconfiguresArkLlm() {
+    void explicitArkProviderCreatesArkLlm() {
+        Agent agent =
+                Agent.builder()
+                        .name("explicit_ark_agent")
+                        .modelProvider("ark")
+                        .model("doubao-seed-2-1-pro-260628")
+                        .modelApiKey("explicit-api-key")
+                        .modelApiBase("https://ark.example.com/api/v3")
+                        .build();
+
+        assertThat(agent.veadkModelName()).isEqualTo("doubao-seed-2-1-pro-260628");
+        ArkLlm arkLlm = (ArkLlm) agent.model().orElseThrow().model().orElseThrow();
+        assertThat(arkLlm.config().getModelName()).isEqualTo("doubao-seed-2-1-pro-260628");
+        assertThat(arkLlm.config().getApiKey()).isEqualTo("explicit-api-key");
+        assertThat(arkLlm.config().getApiBase()).isEqualTo("https://ark.example.com/api/v3");
+    }
+
+    @Test
+    @ClearEnvironmentVariable(key = "MODEL_AGENT_API_KEY")
+    void openAiPrefixCreatesOpenAiCompatibleLlm() {
+        Agent agent =
+                Agent.builder()
+                        .name("openai_prefix_agent")
+                        .model("openai/gpt-4o")
+                        .modelApiKey("openai-key")
+                        .modelBaseUrl("https://api.openai.com/v1")
+                        .build();
+
+        assertThat(agent.veadkModelName()).isEqualTo("gpt-4o");
+        OpenAiCompatibleLlm llm =
+                (OpenAiCompatibleLlm) agent.model().orElseThrow().model().orElseThrow();
+        assertThat(llm.model()).isEqualTo("gpt-4o");
+        assertThat(llm.config().getApiKey()).isEqualTo("openai-key");
+        assertThat(llm.config().getBaseUrl()).isEqualTo("https://api.openai.com/v1");
+    }
+
+    @Test
+    @ClearEnvironmentVariable(key = "MODEL_AGENT_API_KEY")
+    void explicitOpenAiProviderCreatesOpenAiCompatibleLlm() {
+        Agent agent =
+                Agent.builder()
+                        .name("openai_provider_agent")
+                        .modelProvider(ModelProvider.OPENAI_COMPATIBLE)
+                        .model("anthropic/claude-sonnet-4")
+                        .modelApiKey("litellm-key")
+                        .modelBaseUrl("http://localhost:4000/v1")
+                        .build();
+
+        assertThat(agent.veadkModelName()).isEqualTo("anthropic/claude-sonnet-4");
+        OpenAiCompatibleLlm llm =
+                (OpenAiCompatibleLlm) agent.model().orElseThrow().model().orElseThrow();
+        assertThat(llm.model()).isEqualTo("anthropic/claude-sonnet-4");
+        assertThat(llm.config().getBaseUrl()).isEqualTo("http://localhost:4000/v1");
+    }
+
+    @Test
+    @ClearEnvironmentVariable(key = "MODEL_AGENT_API_KEY")
+    @ClearEnvironmentVariable(key = "MODEL_AGENT_API_BASE")
+    void openAiCompatibleUsesDefaultBaseUrl() {
+        Agent agent =
+                Agent.builder()
+                        .name("default_base_url_agent")
+                        .modelProvider("openai")
+                        .model("gpt-4o")
+                        .modelApiKey("openai-key")
+                        .build();
+
+        OpenAiCompatibleLlm llm =
+                (OpenAiCompatibleLlm) agent.model().orElseThrow().model().orElseThrow();
+        assertThat(llm.config().getBaseUrl()).isEqualTo(ArkLlmConfig.DEFAULT_API_BASE);
+    }
+
+    @Test
+    void explicitBaseLlmHasHighestPriorityOverProviderConfig() {
+        TestLlm testLlm = new TestLlm("custom-model");
+
+        Agent agent =
+                Agent.builder()
+                        .name("custom_model_priority_agent")
+                        .modelProvider("openai")
+                        .modelApiKey("openai-key")
+                        .model(testLlm)
+                        .build();
+
+        assertThat(agent.veadkModelName()).isEqualTo("custom-model");
+        assertThat(agent.model().orElseThrow().model().orElseThrow()).isSameAs(testLlm);
+    }
+
+    @Test
+    @ClearEnvironmentVariable(key = "MODEL_AGENT_API_KEY")
+    void modelNameAfterExplicitModelReconfiguresOpenAiCompatibleLlm() {
         Agent agent =
                 Agent.builder()
                         .name("model_order_agent")
@@ -142,14 +245,15 @@ class AgentTest {
 
         assertThat(agent.veadkModelName()).isEqualTo("second-model");
         assertThat(agent.model()).isPresent();
-        assertThat(agent.model().orElseThrow().model().orElseThrow()).isInstanceOf(ArkLlm.class);
+        assertThat(agent.model().orElseThrow().model().orElseThrow())
+                .isInstanceOf(OpenAiCompatibleLlm.class);
         assertThat(agent.model().orElseThrow().model().orElseThrow().model())
                 .isEqualTo("second-model");
     }
 
     @Test
     @ClearEnvironmentVariable(key = "MODEL_AGENT_API_KEY")
-    void missingModelApiKeyFailsFastWhenAutoCreatingArkLlm() {
+    void missingModelApiKeyFailsFastWhenAutoCreatingModel() {
         assertThatThrownBy(
                         () ->
                                 Agent.builder()
@@ -232,6 +336,22 @@ class AgentTest {
     }
 
     @Test
+    void shortTermMemoryIsStoredAndDoesNotInjectTool() {
+        ShortTermMemory shortTermMemory = ShortTermMemory.local();
+
+        Agent agent =
+                Agent.builder()
+                        .name("short_memory_agent")
+                        .model(new TestLlm("short-memory-model"))
+                        .shortTermMemory(shortTermMemory)
+                        .build();
+
+        assertThat(agent.shortTermMemory()).containsSame(shortTermMemory);
+        assertThat(agent.metadataSnapshot().hasShortTermMemory()).isTrue();
+        assertThat(agent.metadataSnapshot().autoToolNames()).isEmpty();
+    }
+
+    @Test
     void autoSaveSessionAddsCallbackOnce() {
         BaseMemoryService memoryService = mock(BaseMemoryService.class);
 
@@ -247,6 +367,33 @@ class AgentTest {
                 .filteredOn(SaveSessionToMemoryCallback.class::isInstance)
                 .hasSize(1);
         assertThat(new Runner(agent).memoryService()).isSameAs(memoryService);
+    }
+
+    @Test
+    void autoSaveSessionUsesConfiguredMemoryPolicy() {
+        BaseMemoryService memoryService = mock(BaseMemoryService.class);
+        SaveSessionToMemoryCallback.AutoSavePolicy policy =
+                SaveSessionToMemoryCallback.AutoSavePolicy.builder()
+                        .minEventsThreshold(2)
+                        .minTimeThreshold(Duration.ofSeconds(3))
+                        .build();
+
+        Agent agent =
+                Agent.builder()
+                        .name("autosave_policy_agent")
+                        .model(new TestLlm("autosave-policy-model"))
+                        .longTermMemory(memoryService)
+                        .autoSaveMemoryPolicy(policy)
+                        .autoSaveSession(true)
+                        .build();
+
+        SaveSessionToMemoryCallback callback =
+                (SaveSessionToMemoryCallback)
+                        agent.afterAgentCallback().stream()
+                                .filter(SaveSessionToMemoryCallback.class::isInstance)
+                                .findFirst()
+                                .orElseThrow();
+        assertThat(callback.policy()).isSameAs(policy);
     }
 
     @Test
