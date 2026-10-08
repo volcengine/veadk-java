@@ -116,6 +116,8 @@ public final class Agent extends LlmAgent {
         private String modelApiKey;
         private String modelApiBase;
         private String modelThinking;
+        private SaveSessionToMemoryCallback.AutoSavePolicy autoSaveMemoryPolicy =
+                SaveSessionToMemoryCallback.AutoSavePolicy.fromEnv();
         private List<Object> explicitTools = List.of();
         private List<Callbacks.AfterAgentCallback> explicitAfterAgentCallbacks = List.of();
 
@@ -158,6 +160,14 @@ public final class Agent extends LlmAgent {
 
         public Builder autoSaveSession(boolean enabled) {
             this.autoSaveSession = enabled;
+            return this;
+        }
+
+        public Builder autoSaveMemoryPolicy(
+                SaveSessionToMemoryCallback.AutoSavePolicy autoSaveMemoryPolicy) {
+            this.autoSaveMemoryPolicy =
+                    Objects.requireNonNull(
+                            autoSaveMemoryPolicy, "autoSaveMemoryPolicy must be set.");
             return this;
         }
 
@@ -578,7 +588,7 @@ public final class Agent extends LlmAgent {
             List<Callbacks.AfterAgentCallback> afterAgentCallbacks =
                     new ArrayList<>(explicitAfterAgentCallbacks);
             if (autoSaveSession && !containsSaveSessionCallback(afterAgentCallbacks)) {
-                afterAgentCallbacks.add(new SaveSessionToMemoryCallback());
+                afterAgentCallbacks.add(new SaveSessionToMemoryCallback(autoSaveMemoryPolicy));
             }
             this.afterAgentCallback = ImmutableList.copyOf(afterAgentCallbacks);
         }

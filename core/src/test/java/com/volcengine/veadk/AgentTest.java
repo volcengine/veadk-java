@@ -42,6 +42,7 @@ import com.volcengine.veadk.tools.knowledgebase.LoadKnowledgebaseTool;
 import io.reactivex.rxjava3.core.Flowable;
 import io.reactivex.rxjava3.core.Maybe;
 import io.reactivex.rxjava3.core.Single;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -366,6 +367,33 @@ class AgentTest {
                 .filteredOn(SaveSessionToMemoryCallback.class::isInstance)
                 .hasSize(1);
         assertThat(new Runner(agent).memoryService()).isSameAs(memoryService);
+    }
+
+    @Test
+    void autoSaveSessionUsesConfiguredMemoryPolicy() {
+        BaseMemoryService memoryService = mock(BaseMemoryService.class);
+        SaveSessionToMemoryCallback.AutoSavePolicy policy =
+                SaveSessionToMemoryCallback.AutoSavePolicy.builder()
+                        .minEventsThreshold(2)
+                        .minTimeThreshold(Duration.ofSeconds(3))
+                        .build();
+
+        Agent agent =
+                Agent.builder()
+                        .name("autosave_policy_agent")
+                        .model(new TestLlm("autosave-policy-model"))
+                        .longTermMemory(memoryService)
+                        .autoSaveMemoryPolicy(policy)
+                        .autoSaveSession(true)
+                        .build();
+
+        SaveSessionToMemoryCallback callback =
+                (SaveSessionToMemoryCallback)
+                        agent.afterAgentCallback().stream()
+                                .filter(SaveSessionToMemoryCallback.class::isInstance)
+                                .findFirst()
+                                .orElseThrow();
+        assertThat(callback.policy()).isSameAs(policy);
     }
 
     @Test
