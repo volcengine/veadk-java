@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package com.volcengine.veadk.example;
+package com.volcengine.veadk.example.web;
 
 import com.google.adk.memory.BaseMemoryService;
 import com.google.adk.web.AdkWebServer;

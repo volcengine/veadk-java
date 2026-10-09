@@ -220,12 +220,20 @@ In the repository root, run: `./mvnw clean -DskipTests package`
 
 After building, the compiled artifacts needed by the examples will be generated in `example/target`.
 
+Example sources are grouped by feature module:
+
+- `example.basic`: minimal Agent, reusable Ark agent, and CLI runner.
+- `example.skills`: local skills, remote Skills Sandbox, and non-blocking remote skill tasks.
+- `example.knowledgebase`: Viking and OpenSearch knowledgebase examples.
+- `example.memory`: Mem0 memory example.
+- `example.web`: ADK Web startup example.
+
 Run the Agent example. It builds an Ark-backed `Agent`, registers a Java
 function tool, and calls `Runner.run(...)` directly:
 
 ```bash
 export MODEL_AGENT_API_KEY="<your-ark-api-key>"
-./mvnw -pl example -am -q compile exec:java -Dexec.mainClass=com.volcengine.veadk.example.AgentExample
+./mvnw -pl example -am -q compile exec:java -Dexec.mainClass=com.volcengine.veadk.example.basic.AgentExample
 ```
 
 Run the local skills example. It loads a reimbursement policy skill from
@@ -233,16 +241,16 @@ Run the local skills example. It loads a reimbursement policy skill from
 
 ```bash
 export MODEL_AGENT_API_KEY="<your-ark-api-key>"
-./mvnw -pl example -am -q compile exec:java -Dexec.mainClass=com.volcengine.veadk.example.LocalSkillsExpenseReviewAgent
+./mvnw -pl example -am -q compile exec:java -Dexec.mainClass=com.volcengine.veadk.example.skills.LocalSkillsExpenseReviewAgent
 ```
 
 ### Run the Example (CLI)
-Entry class: `com.volcengine.veadk.example.AgentCliRunner`.
+Entry class: `com.volcengine.veadk.example.basic.AgentCliRunner`.
 
 Run it (without modifying the POM, directly via Maven Exec plugin coordinates):
 
 ```bash
-./mvnw -pl example -am -q compile exec:java -Dexec.mainClass=com.volcengine.veadk.example.AgentCliRunner
+./mvnw -pl example -am -q compile exec:java -Dexec.mainClass=com.volcengine.veadk.example.basic.AgentCliRunner
 ```
 
 Interaction notes:
@@ -254,8 +262,7 @@ Start command:
 
 ```bash
 ./mvnw -pl example -am -q compile exec:java \
-    -Dexec.mainClass="com.google.adk.web.AdkWebServer" \
-    -Dexec.args="--adk.agents.source-dir=example/target --server.port=8000"  
+    -Dexec.mainClass=com.volcengine.veadk.example.web.AdkWeb
 ```
 
 - Access URL: `http://localhost:8000`
@@ -283,7 +290,7 @@ Run the Mem0 memory example:
 
 ```bash
 ./mvnw -q install -DskipTests
-./mvnw -pl example -am -q compile exec:java -Dexec.mainClass=com.volcengine.veadk.example.Mem0MemoryAgent
+./mvnw -pl example -am -q compile exec:java -Dexec.mainClass=com.volcengine.veadk.example.memory.Mem0MemoryAgent
 ```
 
 ## Related Projects

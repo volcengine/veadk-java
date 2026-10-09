@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package com.volcengine.veadk.example;
+package com.volcengine.veadk.example.skills;
 
 import com.volcengine.veadk.Agent;
 import com.volcengine.veadk.Runner;

@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package com.volcengine.veadk.example;
+package com.volcengine.veadk.example.basic;
 
 import com.google.adk.tools.Annotations.Schema;
 import com.google.adk.tools.FunctionTool;
