@@ -311,6 +311,21 @@ class AgentTest {
     }
 
     @Test
+    void closeClosesAutoCloseableExplicitTools() {
+        CloseableTestTool tool = new CloseableTestTool("closeable_tool");
+        Agent agent =
+                Agent.builder()
+                        .name("closeable_tool_agent")
+                        .model(new TestLlm("closeable-tool-model"))
+                        .tools(tool)
+                        .build();
+
+        agent.close().blockingAwait();
+
+        assertThat(tool.closed()).isTrue();
+    }
+
+    @Test
     void localSkillDirectoryMountsSkillToolset(@TempDir Path tempDir) throws IOException {
         Path skillDir =
                 writeSkill(
@@ -731,6 +746,29 @@ class AgentTest {
         public Single<Map<String, Object>> runAsync(
                 Map<String, Object> args, ToolContext toolContext) {
             return Single.just(Map.of());
+        }
+    }
+
+    private static final class CloseableTestTool extends BaseTool implements AutoCloseable {
+        private boolean closed;
+
+        private CloseableTestTool(String name) {
+            super(name, "test tool");
+        }
+
+        @Override
+        public Single<Map<String, Object>> runAsync(
+                Map<String, Object> args, ToolContext toolContext) {
+            return Single.just(Map.of());
+        }
+
+        @Override
+        public void close() {
+            closed = true;
+        }
+
+        private boolean closed() {
+            return closed;
         }
     }
 

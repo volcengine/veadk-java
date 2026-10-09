@@ -137,8 +137,33 @@ Agent agent = Agent.builder()
     .build();
 ```
 
-当前只支持 `skillsMode("local")`。`skills_sandbox`、`aio_sandbox` 等 Python 侧沙箱
-模式会继续 fail fast，直到 Java 侧有明确的类型化沙箱设计。
+远端 skill source 的元信息和 skill 包可以通过 `VeSkillSource` 暴露给 ADK Java
+`SkillToolset`。source ID 可以是 AgentKit Skill Space（`ss-...`），也可以是
+SkillHub space（`sp-...`）：
+
+```java
+import com.google.adk.tools.skills.SkillToolset;
+import com.volcengine.veadk.skills.VeSkillSource;
+
+Agent agent = Agent.builder()
+    .name("remote-skill-agent")
+    .tools(new SkillToolset(new VeSkillSource(System.getenv("SKILL_SOURCE_ID"))))
+    .build();
+```
+
+如果要委托 Skills Sandbox 执行，传入 AgentKit Skill Space ID，并只暴露 `execute_skills`
+工具：
+
+```java
+import com.volcengine.veadk.tools.sandbox.ExecuteSkillsTool;
+
+Agent agent = Agent.builder()
+    .name("remote-sandbox-agent")
+    .skills(System.getenv("SKILL_SPACE_ID"))
+    .skillsMode("skills_sandbox")
+    .tools(new ExecuteSkillsTool())
+    .build();
+```
 
 metadata 输出包含：
 
@@ -265,7 +290,7 @@ Java Agent 当前不支持以下 Python 侧能力：
 
 - `runtime=codex/piagent`
 - `enableResponses`
-- `skills_sandbox` 或 `aio_sandbox` 等沙箱模式
+- `aio_sandbox`
 - `enableA2ui`
 - `enableTunnel`
 - YAML 或动态工具发现

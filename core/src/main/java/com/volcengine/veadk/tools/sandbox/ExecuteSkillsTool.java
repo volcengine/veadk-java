@@ -29,7 +29,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /** A tool that delegates a workflow prompt to a remote Skills Sandbox. */
-public class ExecuteSkillsTool extends BaseTool {
+public class ExecuteSkillsTool extends BaseTool implements AutoCloseable {
 
     private static final Logger logger = LoggerFactory.getLogger(ExecuteSkillsTool.class);
     private static final int DEFAULT_TIMEOUT_SECONDS = 1800;
@@ -109,6 +109,11 @@ public class ExecuteSkillsTool extends BaseTool {
     @Override
     public Single<Map<String, Object>> runAsync(Map<String, Object> args, ToolContext context) {
         return Single.fromCallable(() -> execute(args, context));
+    }
+
+    @Override
+    public void close() {
+        agentKitWrapper.close();
     }
 
     private Map<String, Object> execute(Map<String, Object> args, ToolContext context) {

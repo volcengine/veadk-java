@@ -35,11 +35,11 @@ public class RemoteSkillsExpenseReviewAgent {
                                         + " space.")
                         .instruction(
                                 """
-                                你是企业财务共享中心的报销预审助手，但你不能直接执行技能。
+                                你是智能助手，但你不能直接执行技能。
                                 收到用户请求后，必须调用 execute_skills 工具，把用户的完整请求交给
                                 Skills Sandbox 中的 Agent 处理。
                                 即使用户只是询问当前有哪些技能，也必须先调用 execute_skills。
-                                最终用中文输出，说明可报销项、需补材料项、需审批项和风险点。
+                                最终用中文输出。
                                 """)
                         .modelName(MODEL_NAME)
                         .skills(skillSpaceId)
@@ -50,14 +50,9 @@ public class RemoteSkillsExpenseReviewAgent {
         try {
             Runner runner = new Runner(agent);
             String prompt =
-                    """
-                    我准备提交一笔报销，请你帮我预审并写一版提交说明：
-                    1. 昨晚 22:40 从客户办公室打车回酒店，金额 96 元，有发票；
-                    2. 客户晚餐 4 人一共 780 元，有发票，参与人包括 2 位客户和 2 位我方同事；
-                    3. 给客户买了 680 元伴手礼，有发票，但还没写客户姓名。
-
-                    请判断哪些能直接报销、哪些需要补审批或补材料、哪些可能不能报。
-                    """;
+"""
+使用技能搜索一下新能源汽车品牌
+""";
 
             System.out.println("Remote skill space: " + skillSpaceId);
             System.out.println("User request:");

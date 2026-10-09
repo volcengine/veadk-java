@@ -67,6 +67,7 @@ public final class Agent extends LlmAgent {
     private final boolean autoSaveSession;
     private final String veadkModelName;
     private final AgentMetadataSnapshot metadataSnapshot;
+    private final List<AutoCloseable> closeableTools;
 
     private Agent(Builder builder) {
         super(builder);
@@ -75,6 +76,11 @@ public final class Agent extends LlmAgent {
         this.autoSaveSession = builder.autoSaveSession;
         this.veadkModelName = Objects.requireNonNullElse(builder.veadkModelName, "");
         this.metadataSnapshot = builder.metadataSnapshot(name(), description());
+        this.closeableTools =
+                builder.explicitTools.stream()
+                        .filter(AutoCloseable.class::isInstance)
+                        .map(AutoCloseable.class::cast)
+                        .toList();
     }
 
     public static Builder builder() {
@@ -109,15 +115,22 @@ public final class Agent extends LlmAgent {
                                 model().flatMap(com.google.adk.models.Model::model)
                                         .filter(AutoCloseable.class::isInstance)
                                         .map(AutoCloseable.class::cast)
-                                        .ifPresent(Agent::closeAutoCloseable));
-        return Completable.mergeArray(super.close(), closeModel);
+                                        .ifPresent(
+                                                closeable ->
+                                                        closeAutoCloseable(closeable, "model")));
+        Completable closeTools =
+                Completable.fromAction(
+                        () ->
+                                closeableTools.forEach(
+                                        closeable -> closeAutoCloseable(closeable, "tool")));
+        return Completable.mergeArray(super.close(), closeModel, closeTools);
     }
 
-    private static void closeAutoCloseable(AutoCloseable closeable) {
+    private static void closeAutoCloseable(AutoCloseable closeable, String resourceType) {
         try {
             closeable.close();
         } catch (Exception e) {
-            throw new RuntimeException("Failed to close model", e);
+            throw new RuntimeException("Failed to close " + resourceType, e);
         }
     }
 

@@ -37,6 +37,11 @@ public class EnvUtil {
     private static final String VOLCENGINE_AGENTKIT_HOST = "VOLCENGINE_AGENTKIT_HOST";
     private static final String VOLC_AGENTKIT_HOST = "VOLC_AGENTKIT_HOST";
     private static final String BYTEPLUS_AGENTKIT_HOST = "BYTEPLUS_AGENTKIT_HOST";
+    private static final String SKILLHUB_SERVICE_NAME = "SKILLHUB_SERVICE_NAME";
+    private static final String SKILLHUB_REGION = "SKILLHUB_REGION";
+    private static final String SKILLHUB_HOST = "SKILLHUB_HOST";
+    private static final String SKILLHUB_TOP_SCHEME = "SKILLHUB_TOP_SCHEME";
+    private static final String SKILLHUB_LIST_SKILLS_PAGE_SIZE = "SKILLHUB_LIST_SKILLS_PAGE_SIZE";
     private static final String REGION = "REGION";
     private static final String MEM0_API_KEY = "DATABASE_MEM0_API_KEY";
     private static final String MEM0_API_KEY_ID = "DATABASE_MEM0_API_KEY_ID";
@@ -53,6 +58,11 @@ public class EnvUtil {
     private static final String DEFAULT_VIKING_MEMORY_TYPE = "sys_event_v1";
     private static final String DEFAULT_AGENTKIT_SERVICE = "agentkit";
     private static final String DEFAULT_AGENTKIT_REGION = "cn-beijing";
+    private static final String DEFAULT_SKILLHUB_SERVICE = "skillhub";
+    private static final String DEFAULT_SKILLHUB_REGION = "cn-guilin-boe";
+    private static final String DEFAULT_SKILLHUB_HOST = "skills.volces.com";
+    private static final String DEFAULT_SKILLHUB_SCHEME = "https";
+    private static final int DEFAULT_SKILLHUB_LIST_SKILLS_PAGE_SIZE = 100;
     private static final String DEFAULT_MEM0_BASE_URL = "https://api.mem0.ai";
 
     private EnvUtil() {}
@@ -107,6 +117,39 @@ public class EnvUtil {
             host = System.getenv(VOLC_AGENTKIT_HOST);
         }
         return StringUtils.isBlank(host) ? "open.volcengineapi.com" : host;
+    }
+
+    public static String getSkillHubService() {
+        String service = System.getenv(SKILLHUB_SERVICE_NAME);
+        return StringUtils.isBlank(service) ? DEFAULT_SKILLHUB_SERVICE : service;
+    }
+
+    public static String getSkillHubRegion() {
+        String region = System.getenv(SKILLHUB_REGION);
+        return StringUtils.isBlank(region) ? DEFAULT_SKILLHUB_REGION : region;
+    }
+
+    public static String getSkillHubHost() {
+        String host = System.getenv(SKILLHUB_HOST);
+        return StringUtils.isBlank(host) ? DEFAULT_SKILLHUB_HOST : host;
+    }
+
+    public static String getSkillHubScheme() {
+        String scheme = System.getenv(SKILLHUB_TOP_SCHEME);
+        return StringUtils.isBlank(scheme) ? DEFAULT_SKILLHUB_SCHEME : scheme.toLowerCase();
+    }
+
+    public static int getSkillHubListSkillsPageSize() {
+        String pageSize = System.getenv(SKILLHUB_LIST_SKILLS_PAGE_SIZE);
+        if (StringUtils.isBlank(pageSize)) {
+            return DEFAULT_SKILLHUB_LIST_SKILLS_PAGE_SIZE;
+        }
+        try {
+            int parsed = Integer.parseInt(pageSize);
+            return parsed > 0 ? parsed : DEFAULT_SKILLHUB_LIST_SKILLS_PAGE_SIZE;
+        } catch (NumberFormatException e) {
+            return DEFAULT_SKILLHUB_LIST_SKILLS_PAGE_SIZE;
+        }
     }
 
     public static String getAgentApiKey() {

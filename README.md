@@ -145,9 +145,33 @@ Agent agent = Agent.builder()
     .build();
 ```
 
-Only `skillsMode("local")` is currently supported. Sandbox-backed Python modes
-such as `skills_sandbox` and `aio_sandbox` intentionally fail fast until a typed
-Java sandbox design is added.
+Remote skill source metadata and skill packages can be exposed through ADK
+Java's `SkillToolset` with `VeSkillSource`. The source ID can be an AgentKit
+Skill Space (`ss-...`) or SkillHub space (`sp-...`):
+
+```java
+import com.google.adk.tools.skills.SkillToolset;
+import com.volcengine.veadk.skills.VeSkillSource;
+
+Agent agent = Agent.builder()
+    .name("remote-skill-agent")
+    .tools(new SkillToolset(new VeSkillSource(System.getenv("SKILL_SOURCE_ID"))))
+    .build();
+```
+
+For Skills Sandbox delegation, configure an AgentKit Skill Space ID and expose
+only the `execute_skills` tool:
+
+```java
+import com.volcengine.veadk.tools.sandbox.ExecuteSkillsTool;
+
+Agent agent = Agent.builder()
+    .name("remote-sandbox-agent")
+    .skills(System.getenv("SKILL_SPACE_ID"))
+    .skillsMode("skills_sandbox")
+    .tools(new ExecuteSkillsTool())
+    .build();
+```
 
 The extracted metadata includes:
 
@@ -277,7 +301,7 @@ The Java Agent does not currently support these Python-side capabilities:
 
 - `runtime=codex/piagent`
 - `enableResponses`
-- sandbox-backed `skillsMode` values such as `skills_sandbox` or `aio_sandbox`
+- `aio_sandbox`
 - `enableA2ui`
 - `enableTunnel`
 - YAML or dynamic tool discovery

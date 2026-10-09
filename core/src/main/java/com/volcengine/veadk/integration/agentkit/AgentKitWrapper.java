@@ -27,7 +27,7 @@ import org.slf4j.LoggerFactory;
 /**
  * A wrapper service implementation to invoke Volcengine AgentKit tools.
  */
-public class AgentKitWrapper extends BaseServiceImpl {
+public class AgentKitWrapper extends BaseServiceImpl implements AutoCloseable {
 
     private static final Logger log = LoggerFactory.getLogger(AgentKitWrapper.class);
 
@@ -35,6 +35,9 @@ public class AgentKitWrapper extends BaseServiceImpl {
     private static final String ACTION_LIST_SESSIONS = "ListSessions";
     private static final String ACTION_CREATE_SESSION = "CreateSession";
     private static final String ACTION_GET_SESSION = "GetSession";
+    private static final String ACTION_LIST_SKILLS_BY_SPACE_ID = "ListSkillsBySpaceId";
+    private static final String ACTION_GEN_TEMP_TOS_OBJECT_DOWNLOAD_URL =
+            "GenTempTosObjectDownloadUrl";
     private static final String API_VERSION = "2025-10-30";
     private static final int SESSION_PAGE_SIZE = 20;
     private static final long SESSION_READY_TIMEOUT_MILLIS = 120_000;
@@ -65,6 +68,8 @@ public class AgentKitWrapper extends BaseServiceImpl {
                     put(ACTION_LIST_SESSIONS, jsonPostApiInfo());
                     put(ACTION_CREATE_SESSION, jsonPostApiInfo());
                     put(ACTION_GET_SESSION, jsonPostApiInfo());
+                    put(ACTION_LIST_SKILLS_BY_SPACE_ID, jsonPostApiInfo());
+                    put(ACTION_GEN_TEMP_TOS_OBJECT_DOWNLOAD_URL, jsonPostApiInfo());
                 }
             };
 
@@ -91,6 +96,11 @@ public class AgentKitWrapper extends BaseServiceImpl {
         this.getServiceInfo().setHost(host);
         this.setRegion(region);
         this.getServiceInfo().getCredentials().setRegion(region);
+    }
+
+    @Override
+    public void close() {
+        destroy();
     }
 
     public AgentKitSession ensureSessionEndpoint(
@@ -216,6 +226,26 @@ public class AgentKitWrapper extends BaseServiceImpl {
         } catch (Exception e) {
             throw new RuntimeException("Failed to run code via AgentKit", e);
         }
+    }
+
+    public JsonNode listSkillsBySpaceId(String skillSpaceId) {
+        Map<String, Object> requestBody = new HashMap<>();
+        requestBody.put("SkillSpaceId", requireText(skillSpaceId, "skillSpaceId must be set."));
+        requestBody.put("InnerTags", Map.of("source", "sandbox"));
+        return invokeAction(ACTION_LIST_SKILLS_BY_SPACE_ID, requestBody);
+    }
+
+    public String generateTempTosObjectDownloadUrl(String skillId, String skillVersion) {
+        Map<String, Object> requestBody = new HashMap<>();
+        requestBody.put("SkillId", requireText(skillId, "skillId must be set."));
+        requestBody.put("SkillVersion", requireText(skillVersion, "skillVersion must be set."));
+        JsonNode result = invokeAction(ACTION_GEN_TEMP_TOS_OBJECT_DOWNLOAD_URL, requestBody);
+        return text(result, "SignedUrl", "signed_url")
+                .orElseThrow(
+                        () ->
+                                new IllegalStateException(
+                                        "AgentKit GenTempTosObjectDownloadUrl response is missing"
+                                                + " SignedUrl"));
     }
 
     public JsonNode invokeTool(

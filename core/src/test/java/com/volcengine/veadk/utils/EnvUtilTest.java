@@ -77,6 +77,34 @@ class EnvUtilTest {
     }
 
     @Test
+    @ClearEnvironmentVariable(key = "SKILLHUB_SERVICE_NAME")
+    @ClearEnvironmentVariable(key = "SKILLHUB_REGION")
+    @ClearEnvironmentVariable(key = "SKILLHUB_HOST")
+    @ClearEnvironmentVariable(key = "SKILLHUB_TOP_SCHEME")
+    @ClearEnvironmentVariable(key = "SKILLHUB_LIST_SKILLS_PAGE_SIZE")
+    void getSkillHubDefaults() {
+        assertThat(EnvUtil.getSkillHubService()).isEqualTo("skillhub");
+        assertThat(EnvUtil.getSkillHubRegion()).isEqualTo("cn-guilin-boe");
+        assertThat(EnvUtil.getSkillHubHost()).isEqualTo("skills.volces.com");
+        assertThat(EnvUtil.getSkillHubScheme()).isEqualTo("https");
+        assertThat(EnvUtil.getSkillHubListSkillsPageSize()).isEqualTo(100);
+    }
+
+    @Test
+    @SetEnvironmentVariable(key = "SKILLHUB_SERVICE_NAME", value = "custom-skillhub")
+    @SetEnvironmentVariable(key = "SKILLHUB_REGION", value = "cn-test")
+    @SetEnvironmentVariable(key = "SKILLHUB_HOST", value = "skillhub.example.com")
+    @SetEnvironmentVariable(key = "SKILLHUB_TOP_SCHEME", value = "HTTP")
+    @SetEnvironmentVariable(key = "SKILLHUB_LIST_SKILLS_PAGE_SIZE", value = "20")
+    void getSkillHubOverrides() {
+        assertThat(EnvUtil.getSkillHubService()).isEqualTo("custom-skillhub");
+        assertThat(EnvUtil.getSkillHubRegion()).isEqualTo("cn-test");
+        assertThat(EnvUtil.getSkillHubHost()).isEqualTo("skillhub.example.com");
+        assertThat(EnvUtil.getSkillHubScheme()).isEqualTo("http");
+        assertThat(EnvUtil.getSkillHubListSkillsPageSize()).isEqualTo(20);
+    }
+
+    @Test
     @SetEnvironmentVariable(key = "VOLCENGINE_SECRET_KEY", value = "test_secret_key")
     void getSecretKey() {
         assertThat(EnvUtil.getSecretKey()).isEqualTo("test_secret_key");

@@ -45,6 +45,16 @@ class ExecuteSkillsToolTest {
     }
 
     @Test
+    void closeClosesAgentKitWrapper() {
+        AgentKitWrapper wrapper = mock(AgentKitWrapper.class);
+        ExecuteSkillsTool tool = new ExecuteSkillsTool(wrapper);
+
+        tool.close();
+
+        verify(wrapper).close();
+    }
+
+    @Test
     void runAsyncPostsA2aMessageAndReturnsArtifactText() throws Exception {
         List<JsonNode> requests = new ArrayList<>();
         HttpServer server =
