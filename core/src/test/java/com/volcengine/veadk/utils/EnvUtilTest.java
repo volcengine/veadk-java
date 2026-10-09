@@ -16,6 +16,18 @@ class EnvUtilTest {
     }
 
     @Test
+    @SetEnvironmentVariable(key = "MODEL_AGENT_API_KEY", value = "test_api_key")
+    void getOptionalAgentApiKey() {
+        assertThat(EnvUtil.getOptionalAgentApiKey()).isEqualTo("test_api_key");
+    }
+
+    @Test
+    @SetEnvironmentVariable(key = "MODEL_AGENT_API_KEY_NAME", value = "default-key")
+    void getAgentApiKeyName() {
+        assertThat(EnvUtil.getAgentApiKeyName()).isEqualTo("default-key");
+    }
+
+    @Test
     @ClearEnvironmentVariable(key = "MODEL_AGENT_API_KEY")
     void getAgentApiKey_withMissingEnv_shouldThrowException() {
         assertThatThrownBy(EnvUtil::getAgentApiKey).isInstanceOf(IllegalStateException.class);
@@ -43,6 +55,25 @@ class EnvUtilTest {
     @ClearEnvironmentVariable(key = "VOLCENGINE_SECRET_KEY")
     void getSecretKey_withMissingEnv_shouldThrowException() {
         assertThatThrownBy(EnvUtil::getSecretKey).isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    @SetEnvironmentVariable(key = "VOLCENGINE_SESSION_TOKEN", value = "session-token")
+    void getSessionToken_prefersVolcengineSessionToken() {
+        assertThat(EnvUtil.getSessionToken()).isEqualTo("session-token");
+    }
+
+    @Test
+    @ClearEnvironmentVariable(key = "VOLCENGINE_SESSION_TOKEN")
+    @SetEnvironmentVariable(key = "VOLC_SESSIONTOKEN", value = "legacy-session-token")
+    void getSessionToken_fallsBackToLegacySessionToken() {
+        assertThat(EnvUtil.getSessionToken()).isEqualTo("legacy-session-token");
+    }
+
+    @Test
+    @SetEnvironmentVariable(key = "CLOUD_PROVIDER", value = "byteplus")
+    void getCloudProvider() {
+        assertThat(EnvUtil.getCloudProvider()).isEqualTo("byteplus");
     }
 
     @Test

@@ -64,7 +64,17 @@ public final class ArkLlmConfig {
         if (StringUtils.isNotBlank(explicitApiKey)) {
             return explicitApiKey.trim();
         }
-        return EnvUtil.getAgentApiKey();
+        String envApiKey = EnvUtil.getOptionalAgentApiKey();
+        if (StringUtils.isNotBlank(envApiKey)) {
+            return envApiKey.trim();
+        }
+        return new ArkApiKeyResolver(
+                        EnvUtil.getAccessKey(),
+                        EnvUtil.getSecretKey(),
+                        EnvUtil.getSessionToken(),
+                        EnvUtil.getRegion(),
+                        EnvUtil.getCloudProvider())
+                .resolve(EnvUtil.getAgentApiKeyName());
     }
 
     private static String resolveApiBase(String explicitApiBase) {

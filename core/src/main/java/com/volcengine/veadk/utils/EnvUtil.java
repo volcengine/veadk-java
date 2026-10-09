@@ -27,6 +27,7 @@ public class EnvUtil {
     private static final String TLS_REGION = "OBSERVABILITY_OPENTELEMETRY_TLS_REGION";
     private static final String VIKINGMEM_MEMORY_TYPE = "DATABASE_VIKINGMEM_MEMORY_TYPE";
     private static final String MODEL_AGENT_API_KEY = "MODEL_AGENT_API_KEY";
+    private static final String MODEL_AGENT_API_KEY_NAME = "MODEL_AGENT_API_KEY_NAME";
     private static final String TOOL_CODE_SANDBOX_URL = "TOOL_CODE_SANDBOX_URL";
     private static final String AGENTKIT_TOOL_ID = "AGENTKIT_TOOL_ID";
     private static final String AGENTKIT_TOOL_SERVICE = "AGENTKIT_TOOL_SERVICE_CODE";
@@ -38,6 +39,9 @@ public class EnvUtil {
     private static final String MEM0_PROJECT_ID = "DATABASE_MEM0_PROJECT_ID";
     private static final String MEM0_BASE_URL = "DATABASE_MEM0_BASE_URL";
     private static final String MEM0_REGION = "DATABASE_MEM0_REGION";
+    private static final String CLOUD_PROVIDER = "CLOUD_PROVIDER";
+    private static final String VOLCENGINE_SESSION_TOKEN = "VOLCENGINE_SESSION_TOKEN";
+    private static final String VOLC_SESSIONTOKEN = "VOLC_SESSIONTOKEN";
 
     // default value
     private static final String DEFAULT_TLS_ENDPONT = "https://tls-cn-beijing.volces.com:4317";
@@ -83,6 +87,14 @@ public class EnvUtil {
         return apiKey;
     }
 
+    public static String getOptionalAgentApiKey() {
+        return System.getenv(MODEL_AGENT_API_KEY);
+    }
+
+    public static String getAgentApiKeyName() {
+        return System.getenv(MODEL_AGENT_API_KEY_NAME);
+    }
+
     public static String getAccessKey() {
         String accessKey = System.getenv(VOLCENGINE_ACCESS_KEY);
         if (StringUtils.isBlank(accessKey)) {
@@ -97,6 +109,18 @@ public class EnvUtil {
             throw getIllegalStateException(VOLCENGINE_SECRET_KEY);
         }
         return secretKey;
+    }
+
+    public static String getSessionToken() {
+        String sessionToken = System.getenv(VOLCENGINE_SESSION_TOKEN);
+        if (StringUtils.isBlank(sessionToken)) {
+            sessionToken = System.getenv(VOLC_SESSIONTOKEN);
+        }
+        return sessionToken;
+    }
+
+    public static String getCloudProvider() {
+        return System.getenv(CLOUD_PROVIDER);
     }
 
     public static String getRegion() {

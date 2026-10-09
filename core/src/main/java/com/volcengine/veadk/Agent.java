@@ -22,9 +22,12 @@ import com.google.adk.agents.LlmAgent;
 import com.google.adk.codeexecutors.BaseCodeExecutor;
 import com.google.adk.memory.BaseMemoryService;
 import com.google.adk.models.BaseLlm;
+import com.google.adk.skills.LocalSkillSource;
+import com.google.adk.skills.SkillSource;
 import com.google.adk.tools.BaseTool;
 import com.google.adk.tools.BaseToolset;
 import com.google.adk.tools.LoadMemoryTool;
+import com.google.adk.tools.skills.SkillToolset;
 import com.google.common.collect.ImmutableList;
 import com.google.genai.types.GenerateContentConfig;
 import com.google.genai.types.Schema;
@@ -32,11 +35,16 @@ import com.volcengine.veadk.knowledgebase.BaseKnowledgebaseService;
 import com.volcengine.veadk.memory.SaveSessionToMemoryCallback;
 import com.volcengine.veadk.model.ArkLlm;
 import com.volcengine.veadk.model.ArkLlmConfig;
+import com.volcengine.veadk.skills.CompositeSkillSource;
+import com.volcengine.veadk.skills.SingleSkillDirectorySource;
 import com.volcengine.veadk.tools.knowledgebase.LoadKnowledgebaseTool;
 import io.reactivex.rxjava3.core.Maybe;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.Executor;
@@ -105,6 +113,8 @@ public final class Agent extends LlmAgent {
         private String modelApiBase;
         private String modelThinking;
         private List<Object> explicitTools = List.of();
+        private List<Object> localSkills = List.of();
+        private String skillsMode = "local";
         private List<Callbacks.AfterAgentCallback> explicitAfterAgentCallbacks = List.of();
 
         public Builder() {
@@ -161,11 +171,23 @@ public final class Agent extends LlmAgent {
         }
 
         public Builder skills(List<?> skills) {
-            throw unsupportedPythonOption("skills");
+            this.localSkills = List.copyOf(Objects.requireNonNull(skills, "skills must be set."));
+            this.skillsMode = "local";
+            return this;
+        }
+
+        public Builder skills(Object... skills) {
+            return skills(Arrays.asList(Objects.requireNonNull(skills, "skills must be set.")));
         }
 
         public Builder skillsMode(String skillsMode) {
-            throw unsupportedPythonOption("skillsMode");
+            String resolvedMode =
+                    requireText(skillsMode, "skillsMode must be set.").toLowerCase(Locale.ROOT);
+            if (!"local".equals(resolvedMode)) {
+                throw unsupportedPythonOption("skillsMode=" + skillsMode);
+            }
+            this.skillsMode = resolvedMode;
+            return this;
         }
 
         public Builder enableA2ui(boolean enabled) {
@@ -507,6 +529,13 @@ public final class Agent extends LlmAgent {
                 generatedAutoToolNames.add(memoryTool.name());
             }
 
+            if (!localSkills.isEmpty() && !containsToolset(tools, SkillToolset.class)) {
+                ensureLocalSkillsMode();
+                BaseToolset skillToolset = new SkillToolset(createSkillSource(localSkills));
+                tools.add(skillToolset);
+                generatedAutoToolNames.add(toolName(skillToolset));
+            }
+
             this.autoToolNames = List.copyOf(generatedAutoToolNames);
             super.tools(tools);
 
@@ -529,6 +558,62 @@ public final class Agent extends LlmAgent {
                     .filter(BaseTool.class::isInstance)
                     .map(BaseTool.class::cast)
                     .anyMatch(tool -> tool.name().equals(name));
+        }
+
+        private static boolean containsToolset(
+                List<?> tools, Class<? extends BaseToolset> toolsetType) {
+            return tools.stream().anyMatch(toolsetType::isInstance);
+        }
+
+        private void ensureLocalSkillsMode() {
+            if (!"local".equals(skillsMode)) {
+                throw unsupportedPythonOption("skillsMode=" + skillsMode);
+            }
+        }
+
+        private static SkillSource createSkillSource(List<?> skills) {
+            List<SkillSource> sources = skills.stream().map(Builder::createSkillSource).toList();
+            return sources.size() == 1 ? sources.get(0) : new CompositeSkillSource(sources);
+        }
+
+        private static SkillSource createSkillSource(Object skill) {
+            Objects.requireNonNull(skill, "skill must not be null.");
+            if (skill instanceof SkillSource skillSource) {
+                return skillSource;
+            }
+            if (skill instanceof Path path) {
+                return createLocalSkillSource(path);
+            }
+            if (skill instanceof String path) {
+                return createLocalSkillSource(
+                        Path.of(requireText(path, "skill path must be set.")));
+            }
+            throw new IllegalArgumentException(
+                    "skills entries must be String, Path, or SkillSource, but got "
+                            + skill.getClass().getName());
+        }
+
+        private static SkillSource createLocalSkillSource(Path path) {
+            Path resolvedPath =
+                    Objects.requireNonNull(path, "skill path must be set.")
+                            .toAbsolutePath()
+                            .normalize();
+            if (Files.isRegularFile(resolvedPath)) {
+                String fileName = resolvedPath.getFileName().toString();
+                if (!"SKILL.md".equals(fileName) && !"skill.md".equals(fileName)) {
+                    throw new IllegalArgumentException(
+                            "skill file path must point to SKILL.md or skill.md: " + resolvedPath);
+                }
+                return new SingleSkillDirectorySource(resolvedPath.getParent());
+            }
+            if (!Files.isDirectory(resolvedPath)) {
+                throw new IllegalArgumentException("skill path does not exist: " + resolvedPath);
+            }
+            if (Files.isRegularFile(resolvedPath.resolve("SKILL.md"))
+                    || Files.isRegularFile(resolvedPath.resolve("skill.md"))) {
+                return new SingleSkillDirectorySource(resolvedPath);
+            }
+            return new LocalSkillSource(resolvedPath);
         }
 
         private static boolean containsSaveSessionCallback(
@@ -604,8 +689,9 @@ public final class Agent extends LlmAgent {
         private static UnsupportedOperationException unsupportedPythonOption(String optionName) {
             return new UnsupportedOperationException(
                     optionName
-                            + " is not supported in Agent PR-0. The Java Agent keeps this"
-                            + " Python-side option fail-fast until a typed Java design is added.");
+                            + " is not supported by the current Java Agent. The Java Agent keeps"
+                            + " this Python-side option fail-fast until a typed Java design is"
+                            + " added.");
         }
     }
 }
