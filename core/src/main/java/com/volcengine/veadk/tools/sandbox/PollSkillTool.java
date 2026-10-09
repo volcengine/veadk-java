@@ -30,14 +30,14 @@ import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-/** A tool that delegates a workflow prompt to a remote Skills Sandbox. */
-public class ExecuteSkillsTool extends BaseTool implements AutoCloseable {
+/** A tool that fetches one Skills Sandbox task snapshot. */
+public class PollSkillTool extends BaseTool implements AutoCloseable {
 
-    private static final Logger logger = LoggerFactory.getLogger(ExecuteSkillsTool.class);
+    private static final Logger logger = LoggerFactory.getLogger(PollSkillTool.class);
 
     private final SkillsSandboxA2aClient client;
 
-    public ExecuteSkillsTool() {
+    public PollSkillTool() {
         this(
                 new AgentKitWrapper(
                         EnvUtil.getAgentKitManagementHost(),
@@ -47,15 +47,12 @@ public class ExecuteSkillsTool extends BaseTool implements AutoCloseable {
                 HttpClient.newHttpClient());
     }
 
-    ExecuteSkillsTool(AgentKitWrapper agentKitWrapper) {
+    PollSkillTool(AgentKitWrapper agentKitWrapper) {
         this(agentKitWrapper, HttpClient.newHttpClient());
     }
 
-    ExecuteSkillsTool(AgentKitWrapper agentKitWrapper, HttpClient httpClient) {
-        super(
-                "execute_skills",
-                "Execute skills in a remote Skills Sandbox and return the final output.",
-                false);
+    PollSkillTool(AgentKitWrapper agentKitWrapper, HttpClient httpClient) {
+        super("poll_skill", "Fetch a Skills Sandbox task status snapshot.", false);
         this.client = new SkillsSandboxA2aClient(agentKitWrapper, httpClient);
     }
 
@@ -70,32 +67,29 @@ public class ExecuteSkillsTool extends BaseTool implements AutoCloseable {
                                         .type("OBJECT")
                                         .properties(
                                                 ImmutableMap.of(
-                                                        "workflow_prompt",
+                                                        "task_id",
                                                         Schema.builder()
                                                                 .type("STRING")
                                                                 .description(
-                                                                        "The user request or"
-                                                                            + " workflow"
-                                                                            + " instruction to run"
-                                                                            + " in the Skills"
-                                                                            + " Sandbox.")
+                                                                        "The A2A task id returned"
+                                                                            + " by invoke_skill.")
                                                                 .build(),
                                                         "timeout",
                                                         Schema.builder()
                                                                 .type("INTEGER")
                                                                 .description(
-                                                                        "The execution timeout in"
+                                                                        "The request timeout in"
                                                                             + " seconds. Defaults"
                                                                             + " to 1800.")
                                                                 .build()))
-                                        .required(ImmutableList.of("workflow_prompt"))
+                                        .required(ImmutableList.of("task_id"))
                                         .build())
                         .build());
     }
 
     @Override
     public Single<Map<String, Object>> runAsync(Map<String, Object> args, ToolContext context) {
-        return Single.fromCallable(() -> execute(args, context));
+        return Single.fromCallable(() -> poll(args, context));
     }
 
     @Override
@@ -103,20 +97,14 @@ public class ExecuteSkillsTool extends BaseTool implements AutoCloseable {
         client.close();
     }
 
-    private Map<String, Object> execute(Map<String, Object> args, ToolContext context) {
+    private Map<String, Object> poll(Map<String, Object> args, ToolContext context) {
         try {
-            String workflowPrompt =
-                    requireText((String) args.get("workflow_prompt"), "workflow_prompt");
-            if (args.containsKey("env_vars") && args.get("env_vars") != null) {
-                throw new IllegalArgumentException(
-                        "env_vars is not supported for execute_skills A2A execution");
-            }
+            String taskId = requireText((String) args.get("task_id"), "task_id");
             int timeout = SkillsSandboxA2aClient.timeoutSeconds(args.get("timeout"));
-            String result = client.execute(workflowPrompt, context, timeout);
-            return ImmutableMap.of("result", result);
+            return client.toMap(client.poll(taskId, context, timeout));
         } catch (Exception e) {
-            logger.error("Failed to execute skills sandbox request: {}", e.getMessage());
-            logger.debug("Failed to execute skills sandbox request", e);
+            logger.error("Failed to poll skills sandbox task: {}", e.getMessage());
+            logger.debug("Failed to poll skills sandbox task", e);
             return ImmutableMap.of("error", e.getMessage());
         }
     }

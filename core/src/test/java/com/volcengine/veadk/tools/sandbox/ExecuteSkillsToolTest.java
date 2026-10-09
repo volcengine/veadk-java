@@ -3,6 +3,7 @@ package com.volcengine.veadk.tools.sandbox;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
@@ -75,7 +76,8 @@ class ExecuteSkillsToolTest {
                             eq("skills-tool"),
                             eq("remote_agent_user-1_session-1"),
                             anyInt(),
-                            anyBoolean()))
+                            anyBoolean(),
+                            anyMap()))
                     .thenReturn(
                             AgentKitSession.of(
                                     "session-id",
@@ -115,7 +117,72 @@ class ExecuteSkillsToolTest {
                             eq("skills-tool"),
                             eq("remote_agent_user-1_session-1"),
                             eq(1800),
-                            eq(true));
+                            eq(true),
+                            eq(Map.of()));
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void invokeSkillReturnsInitialTask() throws Exception {
+        List<JsonNode> requests = new ArrayList<>();
+        HttpServer server =
+                startA2aServer(
+                        requests,
+                        List.of(
+                                """
+                                {"result":{"kind":"task","id":"task-9","status":{"state":"working"}}}
+                                """));
+        try (MockedStatic<EnvUtil> envUtilMock = mockStatic(EnvUtil.class)) {
+            envUtilMock.when(EnvUtil::getAgentKitSkillsToolId).thenReturn("skills-tool");
+
+            AgentKitWrapper wrapper = wrapperFor(server);
+            InvokeSkillTool tool = new InvokeSkillTool(wrapper);
+
+            Map<String, Object> result =
+                    tool.runAsync(ImmutableMap.of("workflow_prompt", "后台生成供应商风险报告"), toolContext())
+                            .blockingGet();
+
+            assertThat(result).containsEntry("id", "task-9");
+            assertThat(requests).hasSize(1);
+            assertThat(requests.get(0).path("method").asText()).isEqualTo("message/send");
+            assertThat(
+                            requests.get(0)
+                                    .path("params")
+                                    .path("configuration")
+                                    .path("blocking")
+                                    .asBoolean())
+                    .isFalse();
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void pollSkillReturnsTaskSnapshot() throws Exception {
+        List<JsonNode> requests = new ArrayList<>();
+        HttpServer server =
+                startA2aServer(
+                        requests,
+                        List.of(
+                                """
+                                {"result":{"kind":"task","id":"task-9","status":{"state":"completed"}}}
+                                """));
+        try (MockedStatic<EnvUtil> envUtilMock = mockStatic(EnvUtil.class)) {
+            envUtilMock.when(EnvUtil::getAgentKitSkillsToolId).thenReturn("skills-tool");
+
+            AgentKitWrapper wrapper = wrapperFor(server);
+            PollSkillTool tool = new PollSkillTool(wrapper);
+
+            Map<String, Object> result =
+                    tool.runAsync(ImmutableMap.of("task_id", "task-9"), toolContext())
+                            .blockingGet();
+
+            assertThat(result).containsEntry("id", "task-9");
+            assertThat(requests).hasSize(1);
+            assertThat(requests.get(0).path("method").asText()).isEqualTo("tasks/get");
+            assertThat(requests.get(0).path("params").path("id").asText()).isEqualTo("task-9");
         } finally {
             server.stop(0);
         }
@@ -150,6 +217,25 @@ class ExecuteSkillsToolTest {
                 });
         server.start();
         return server;
+    }
+
+    private static AgentKitWrapper wrapperFor(HttpServer server) {
+        AgentKitWrapper wrapper = mock(AgentKitWrapper.class);
+        when(wrapper.ensureSessionEndpoint(
+                        eq("skills-tool"),
+                        eq("remote_agent_user-1_session-1"),
+                        anyInt(),
+                        anyBoolean(),
+                        anyMap()))
+                .thenReturn(
+                        AgentKitSession.of(
+                                "session-id",
+                                "remote_agent_user-1_session-1",
+                                "Ready",
+                                "http://127.0.0.1:" + server.getAddress().getPort(),
+                                null,
+                                "2026-10-09T00:00:00Z"));
+        return wrapper;
     }
 
     private static void respond(HttpExchange exchange, String body) throws IOException {

@@ -30,14 +30,14 @@ import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-/** A tool that delegates a workflow prompt to a remote Skills Sandbox. */
-public class ExecuteSkillsTool extends BaseTool implements AutoCloseable {
+/** A tool that creates a non-blocking Skills Sandbox task. */
+public class InvokeSkillTool extends BaseTool implements AutoCloseable {
 
-    private static final Logger logger = LoggerFactory.getLogger(ExecuteSkillsTool.class);
+    private static final Logger logger = LoggerFactory.getLogger(InvokeSkillTool.class);
 
     private final SkillsSandboxA2aClient client;
 
-    public ExecuteSkillsTool() {
+    public InvokeSkillTool() {
         this(
                 new AgentKitWrapper(
                         EnvUtil.getAgentKitManagementHost(),
@@ -47,15 +47,12 @@ public class ExecuteSkillsTool extends BaseTool implements AutoCloseable {
                 HttpClient.newHttpClient());
     }
 
-    ExecuteSkillsTool(AgentKitWrapper agentKitWrapper) {
+    InvokeSkillTool(AgentKitWrapper agentKitWrapper) {
         this(agentKitWrapper, HttpClient.newHttpClient());
     }
 
-    ExecuteSkillsTool(AgentKitWrapper agentKitWrapper, HttpClient httpClient) {
-        super(
-                "execute_skills",
-                "Execute skills in a remote Skills Sandbox and return the final output.",
-                false);
+    InvokeSkillTool(AgentKitWrapper agentKitWrapper, HttpClient httpClient) {
+        super("invoke_skill", "Create a non-blocking task in a remote Skills Sandbox.", false);
         this.client = new SkillsSandboxA2aClient(agentKitWrapper, httpClient);
     }
 
@@ -84,7 +81,7 @@ public class ExecuteSkillsTool extends BaseTool implements AutoCloseable {
                                                         Schema.builder()
                                                                 .type("INTEGER")
                                                                 .description(
-                                                                        "The execution timeout in"
+                                                                        "The request timeout in"
                                                                             + " seconds. Defaults"
                                                                             + " to 1800.")
                                                                 .build()))
@@ -95,7 +92,7 @@ public class ExecuteSkillsTool extends BaseTool implements AutoCloseable {
 
     @Override
     public Single<Map<String, Object>> runAsync(Map<String, Object> args, ToolContext context) {
-        return Single.fromCallable(() -> execute(args, context));
+        return Single.fromCallable(() -> invoke(args, context));
     }
 
     @Override
@@ -103,20 +100,15 @@ public class ExecuteSkillsTool extends BaseTool implements AutoCloseable {
         client.close();
     }
 
-    private Map<String, Object> execute(Map<String, Object> args, ToolContext context) {
+    private Map<String, Object> invoke(Map<String, Object> args, ToolContext context) {
         try {
             String workflowPrompt =
                     requireText((String) args.get("workflow_prompt"), "workflow_prompt");
-            if (args.containsKey("env_vars") && args.get("env_vars") != null) {
-                throw new IllegalArgumentException(
-                        "env_vars is not supported for execute_skills A2A execution");
-            }
             int timeout = SkillsSandboxA2aClient.timeoutSeconds(args.get("timeout"));
-            String result = client.execute(workflowPrompt, context, timeout);
-            return ImmutableMap.of("result", result);
+            return client.toMap(client.invoke(workflowPrompt, context, timeout));
         } catch (Exception e) {
-            logger.error("Failed to execute skills sandbox request: {}", e.getMessage());
-            logger.debug("Failed to execute skills sandbox request", e);
+            logger.error("Failed to invoke skills sandbox task: {}", e.getMessage());
+            logger.debug("Failed to invoke skills sandbox task", e);
             return ImmutableMap.of("error", e.getMessage());
         }
     }

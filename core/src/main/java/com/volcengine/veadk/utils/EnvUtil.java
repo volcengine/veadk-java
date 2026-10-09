@@ -42,6 +42,8 @@ public class EnvUtil {
     private static final String SKILLHUB_HOST = "SKILLHUB_HOST";
     private static final String SKILLHUB_TOP_SCHEME = "SKILLHUB_TOP_SCHEME";
     private static final String SKILLHUB_LIST_SKILLS_PAGE_SIZE = "SKILLHUB_LIST_SKILLS_PAGE_SIZE";
+    private static final String SKILL_SPACE_POLICY = "SKILL_SPACE_POLICY";
+    private static final String FINDSKILL_DOWNLOAD_URL = "FINDSKILL_DOWNLOAD_URL";
     private static final String REGION = "REGION";
     private static final String MEM0_API_KEY = "DATABASE_MEM0_API_KEY";
     private static final String MEM0_API_KEY_ID = "DATABASE_MEM0_API_KEY_ID";
@@ -63,6 +65,8 @@ public class EnvUtil {
     private static final String DEFAULT_SKILLHUB_HOST = "skills.volces.com";
     private static final String DEFAULT_SKILLHUB_SCHEME = "https";
     private static final int DEFAULT_SKILLHUB_LIST_SKILLS_PAGE_SIZE = 100;
+    private static final String DEFAULT_FINDSKILL_DOWNLOAD_URL =
+            "https://skills.volces.com/v1/skills/download";
     private static final String DEFAULT_MEM0_BASE_URL = "https://api.mem0.ai";
 
     private EnvUtil() {}
@@ -150,6 +154,15 @@ public class EnvUtil {
         } catch (NumberFormatException e) {
             return DEFAULT_SKILLHUB_LIST_SKILLS_PAGE_SIZE;
         }
+    }
+
+    public static String getSkillSpacePolicy() {
+        return System.getenv(SKILL_SPACE_POLICY);
+    }
+
+    public static String getFindSkillDownloadUrl() {
+        String url = System.getenv(FINDSKILL_DOWNLOAD_URL);
+        return StringUtils.isBlank(url) ? DEFAULT_FINDSKILL_DOWNLOAD_URL : url;
     }
 
     public static String getAgentApiKey() {

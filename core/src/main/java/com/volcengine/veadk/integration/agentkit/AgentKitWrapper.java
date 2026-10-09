@@ -105,6 +105,15 @@ public class AgentKitWrapper extends BaseServiceImpl implements AutoCloseable {
 
     public AgentKitSession ensureSessionEndpoint(
             String toolId, String toolUserSessionId, int ttl, boolean waitUntilReady) {
+        return ensureSessionEndpoint(toolId, toolUserSessionId, ttl, waitUntilReady, Map.of());
+    }
+
+    public AgentKitSession ensureSessionEndpoint(
+            String toolId,
+            String toolUserSessionId,
+            int ttl,
+            boolean waitUntilReady,
+            Map<String, String> envs) {
         AgentKitSession session = findReusableSession(toolId, toolUserSessionId).orElse(null);
         if (session == null) {
             Map<String, Object> requestBody = new HashMap<>();
@@ -113,6 +122,20 @@ public class AgentKitWrapper extends BaseServiceImpl implements AutoCloseable {
                     "UserSessionId",
                     requireText(toolUserSessionId, "toolUserSessionId must be set."));
             requestBody.put("Ttl", ttl);
+            if (envs != null && !envs.isEmpty()) {
+                requestBody.put(
+                        "Envs",
+                        envs.entrySet().stream()
+                                .map(
+                                        entry ->
+                                                Map.of(
+                                                        "Key",
+                                                        requireText(entry.getKey(), "env key"),
+                                                        "Value",
+                                                        Objects.requireNonNullElse(
+                                                                entry.getValue(), "")))
+                                .toList());
+            }
             session = parseSession(invokeAction(ACTION_CREATE_SESSION, requestBody));
         }
 

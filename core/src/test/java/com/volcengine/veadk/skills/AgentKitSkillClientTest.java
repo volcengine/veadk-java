@@ -17,6 +17,7 @@ package com.volcengine.veadk.skills;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -33,6 +34,7 @@ import java.nio.file.Path;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.mockito.MockedStatic;
 
 class AgentKitSkillClientTest {
 
@@ -69,6 +71,55 @@ class AgentKitSkillClientTest {
         assertThat(skill.bucketName()).contains("bucket-a");
         assertThat(skill.id()).contains("skill-alpha");
         assertThat(skill.versionId()).contains("v1");
+    }
+
+    @Test
+    void listSkillsAppliesSkillSpacePolicy() throws Exception {
+        AgentKitWrapper wrapper = mock(AgentKitWrapper.class);
+        when(wrapper.listSkillsBySpaceId("ss-test"))
+                .thenReturn(
+                        JSONUtil.parseJson(
+                                """
+                                {
+                                  "Items": [
+                                    {"Name": "alpha-skill", "SkillId": "skill-alpha"},
+                                    {"Name": "beta-skill", "SkillId": "skill-beta"}
+                                  ]
+                                }
+                                """));
+        AgentKitSkillClient client = new AgentKitSkillClient(wrapper, HttpClient.newHttpClient());
+
+        try (MockedStatic<com.volcengine.veadk.utils.EnvUtil> envUtilMock =
+                mockStatic(com.volcengine.veadk.utils.EnvUtil.class)) {
+            envUtilMock
+                    .when(com.volcengine.veadk.utils.EnvUtil::getSkillSpacePolicy)
+                    .thenReturn("{\"mode\":\"allow\",\"ids\":[\"skill-beta\"]}");
+
+            List<RemoteSkill> skills = client.listSkills("ss-test");
+
+            assertThat(skills).extracting(RemoteSkill::name).containsExactly("beta-skill");
+        }
+    }
+
+    @Test
+    void invalidSkillSpacePolicyDisablesRemoteSkills() throws Exception {
+        AgentKitWrapper wrapper = mock(AgentKitWrapper.class);
+        when(wrapper.listSkillsBySpaceId("ss-test"))
+                .thenReturn(
+                        JSONUtil.parseJson(
+                                """
+                                {"Items": [{"Name": "alpha-skill", "SkillId": "skill-alpha"}]}
+                                """));
+        AgentKitSkillClient client = new AgentKitSkillClient(wrapper, HttpClient.newHttpClient());
+
+        try (MockedStatic<com.volcengine.veadk.utils.EnvUtil> envUtilMock =
+                mockStatic(com.volcengine.veadk.utils.EnvUtil.class)) {
+            envUtilMock
+                    .when(com.volcengine.veadk.utils.EnvUtil::getSkillSpacePolicy)
+                    .thenReturn("{\"mode\":\"allow\",\"ids\":[\" skill-alpha\"]}");
+
+            assertThat(client.listSkills("ss-test")).isEmpty();
+        }
     }
 
     @Test
@@ -151,9 +202,51 @@ class AgentKitSkillClientTest {
         verify(skillHubClient).downloadSkill(skill, zipPath);
     }
 
+    @Test
+    void downloadFindSkillUsesPublicSlug(@TempDir Path tempDir) throws Exception {
+        byte[] zipBody = zipHeaderOnly();
+        HttpServer server = startDownloadServer(zipBody);
+        try {
+            AgentKitSkillClient client =
+                    new AgentKitSkillClient(
+                            mock(AgentKitWrapper.class),
+                            HttpClient.newHttpClient(),
+                            mock(SkillHubClient.class),
+                            "http://127.0.0.1:"
+                                    + server.getAddress().getPort()
+                                    + "/v1/skills/download");
+            RemoteSkill skill =
+                    new RemoteSkill(
+                            "public-skill",
+                            "Public skill.",
+                            "",
+                            "findskill",
+                            null,
+                            null,
+                            "team/public-skill",
+                            "findskill",
+                            "v1");
+            Path zipPath = tempDir.resolve("public.zip");
+
+            client.downloadSkill(skill, zipPath);
+
+            assertThat(Files.readAllBytes(zipPath)).isEqualTo(zipBody);
+        } finally {
+            server.stop(0);
+        }
+    }
+
     private static HttpServer startDownloadServer(String body) throws IOException {
         HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/skill.zip", exchange -> respond(exchange, body));
+        server.start();
+        return server;
+    }
+
+    private static HttpServer startDownloadServer(byte[] body) throws IOException {
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext(
+                "/v1/skills/download/team/public-skill", exchange -> respond(exchange, body));
         server.start();
         return server;
     }
@@ -163,5 +256,15 @@ class AgentKitSkillClientTest {
         exchange.sendResponseHeaders(200, bytes.length);
         exchange.getResponseBody().write(bytes);
         exchange.close();
+    }
+
+    private static void respond(HttpExchange exchange, byte[] bytes) throws IOException {
+        exchange.sendResponseHeaders(200, bytes.length);
+        exchange.getResponseBody().write(bytes);
+        exchange.close();
+    }
+
+    private static byte[] zipHeaderOnly() {
+        return new byte[] {'P', 'K', 0x05, 0x06, 0, 0, 0, 0};
     }
 }

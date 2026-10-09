@@ -50,9 +50,12 @@ public class RemoteSkillsExpenseReviewAgent {
         try {
             Runner runner = new Runner(agent);
             String prompt =
-"""
-使用技能搜索一下新能源汽车品牌
-""";
+                    """
+                    请预审报销单 ER-2026-1018：
+                    申请人李想从杭州到深圳拜访供应商，提交机票 1180 元、酒店 960 元、
+                    出租车 214 元、供应商招待餐 1320 元。报销说明里缺少客户参会名单，
+                    餐饮金额也接近部门单次上限。请使用技能给出审批建议。
+                    """;
 
             System.out.println("Remote skill space: " + skillSpaceId);
             System.out.println("User request:");
