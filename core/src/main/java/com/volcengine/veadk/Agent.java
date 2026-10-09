@@ -38,6 +38,7 @@ import com.volcengine.veadk.model.ArkLlmConfig;
 import com.volcengine.veadk.skills.CompositeSkillSource;
 import com.volcengine.veadk.skills.SingleSkillDirectorySource;
 import com.volcengine.veadk.tools.knowledgebase.LoadKnowledgebaseTool;
+import io.reactivex.rxjava3.core.Completable;
 import io.reactivex.rxjava3.core.Maybe;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -58,6 +59,8 @@ public final class Agent extends LlmAgent {
     public static final String DEFAULT_MODEL_NAME = "doubao-seed-2-1-pro-260628";
     public static final String AUTO_TOOL_METADATA_KEY = "veadk.autoTool";
     public static final String AUTO_TOOL_SOURCE_METADATA_KEY = "veadk.autoToolSource";
+    private static final String SKILLS_MODE_LOCAL = "local";
+    private static final String SKILLS_MODE_SKILLS_SANDBOX = "skills_sandbox";
 
     private final BaseMemoryService longTermMemoryService;
     private final BaseKnowledgebaseService knowledgebaseService;
@@ -96,6 +99,26 @@ public final class Agent extends LlmAgent {
 
     public AgentMetadataSnapshot metadataSnapshot() {
         return metadataSnapshot;
+    }
+
+    @Override
+    public Completable close() {
+        Completable closeModel =
+                Completable.fromAction(
+                        () ->
+                                model().flatMap(com.google.adk.models.Model::model)
+                                        .filter(AutoCloseable.class::isInstance)
+                                        .map(AutoCloseable.class::cast)
+                                        .ifPresent(Agent::closeAutoCloseable));
+        return Completable.mergeArray(super.close(), closeModel);
+    }
+
+    private static void closeAutoCloseable(AutoCloseable closeable) {
+        try {
+            closeable.close();
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to close model", e);
+        }
     }
 
     /** Builder for {@link Agent}. */
@@ -172,7 +195,6 @@ public final class Agent extends LlmAgent {
 
         public Builder skills(List<?> skills) {
             this.localSkills = List.copyOf(Objects.requireNonNull(skills, "skills must be set."));
-            this.skillsMode = "local";
             return this;
         }
 
@@ -183,7 +205,8 @@ public final class Agent extends LlmAgent {
         public Builder skillsMode(String skillsMode) {
             String resolvedMode =
                     requireText(skillsMode, "skillsMode must be set.").toLowerCase(Locale.ROOT);
-            if (!"local".equals(resolvedMode)) {
+            if (!SKILLS_MODE_LOCAL.equals(resolvedMode)
+                    && !SKILLS_MODE_SKILLS_SANDBOX.equals(resolvedMode)) {
                 throw unsupportedPythonOption("skillsMode=" + skillsMode);
             }
             this.skillsMode = resolvedMode;
@@ -529,11 +552,26 @@ public final class Agent extends LlmAgent {
                 generatedAutoToolNames.add(memoryTool.name());
             }
 
-            if (!localSkills.isEmpty() && !containsToolset(tools, SkillToolset.class)) {
-                ensureLocalSkillsMode();
-                BaseToolset skillToolset = new SkillToolset(createSkillSource(localSkills));
-                tools.add(skillToolset);
-                generatedAutoToolNames.add(toolName(skillToolset));
+            if (!localSkills.isEmpty()) {
+                if (SKILLS_MODE_LOCAL.equals(skillsMode)) {
+                    if (!containsToolset(tools, SkillToolset.class)) {
+                        BaseToolset skillToolset = new SkillToolset(createSkillSource(localSkills));
+                        tools.add(skillToolset);
+                        generatedAutoToolNames.add(toolName(skillToolset));
+                    }
+                } else if (SKILLS_MODE_SKILLS_SANDBOX.equals(skillsMode)) {
+                    validateSkillsSandboxSources(localSkills);
+                    if (!containsToolNamed(tools, "execute_skills")) {
+                        throw new IllegalArgumentException(
+                                "skills_sandbox requires an explicit execute_skills tool.");
+                    }
+                } else {
+                    throw unsupportedPythonOption("skillsMode=" + skillsMode);
+                }
+            } else if (SKILLS_MODE_SKILLS_SANDBOX.equals(skillsMode)) {
+                throw new IllegalArgumentException(
+                        "skills must contain at least one Skill Space ID when skillsMode is"
+                                + " skills_sandbox.");
             }
 
             this.autoToolNames = List.copyOf(generatedAutoToolNames);
@@ -563,12 +601,6 @@ public final class Agent extends LlmAgent {
         private static boolean containsToolset(
                 List<?> tools, Class<? extends BaseToolset> toolsetType) {
             return tools.stream().anyMatch(toolsetType::isInstance);
-        }
-
-        private void ensureLocalSkillsMode() {
-            if (!"local".equals(skillsMode)) {
-                throw unsupportedPythonOption("skillsMode=" + skillsMode);
-            }
         }
 
         private static SkillSource createSkillSource(List<?> skills) {
@@ -614,6 +646,22 @@ public final class Agent extends LlmAgent {
                 return new SingleSkillDirectorySource(resolvedPath);
             }
             return new LocalSkillSource(resolvedPath);
+        }
+
+        private static void validateSkillsSandboxSources(List<?> skills) {
+            for (Object skill : skills) {
+                if (!(skill instanceof String skillSpaceId)) {
+                    throw new IllegalArgumentException(
+                            "skills_sandbox skills entries must be Skill Space ID strings.");
+                }
+                String resolvedSkillSpaceId =
+                        requireText(skillSpaceId, "skill space ID must be set.");
+                if (!resolvedSkillSpaceId.startsWith("ss-")) {
+                    throw new IllegalArgumentException(
+                            "skills_sandbox skill space ID must start with ss-: "
+                                    + resolvedSkillSpaceId);
+                }
+            }
         }
 
         private static boolean containsSaveSessionCallback(

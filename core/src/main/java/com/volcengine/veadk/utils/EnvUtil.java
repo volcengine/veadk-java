@@ -30,9 +30,13 @@ public class EnvUtil {
     private static final String MODEL_AGENT_API_KEY_NAME = "MODEL_AGENT_API_KEY_NAME";
     private static final String TOOL_CODE_SANDBOX_URL = "TOOL_CODE_SANDBOX_URL";
     private static final String AGENTKIT_TOOL_ID = "AGENTKIT_TOOL_ID";
+    private static final String AGENTKIT_TOOL_ID_SKILLS = "AGENTKIT_TOOL_ID_SKILLS";
     private static final String AGENTKIT_TOOL_SERVICE = "AGENTKIT_TOOL_SERVICE_CODE";
     private static final String AGENTKIT_TOOL_REGION = "AGENTKIT_TOOL_REGION";
     private static final String AGENTKIT_TOOL_HOST = "AGENTKIT_TOOL_HOST";
+    private static final String VOLCENGINE_AGENTKIT_HOST = "VOLCENGINE_AGENTKIT_HOST";
+    private static final String VOLC_AGENTKIT_HOST = "VOLC_AGENTKIT_HOST";
+    private static final String BYTEPLUS_AGENTKIT_HOST = "BYTEPLUS_AGENTKIT_HOST";
     private static final String REGION = "REGION";
     private static final String MEM0_API_KEY = "DATABASE_MEM0_API_KEY";
     private static final String MEM0_API_KEY_ID = "DATABASE_MEM0_API_KEY_ID";
@@ -61,6 +65,14 @@ public class EnvUtil {
         return toolId;
     }
 
+    public static String getAgentKitSkillsToolId() {
+        String toolId = System.getenv(AGENTKIT_TOOL_ID_SKILLS);
+        if (StringUtils.isBlank(toolId)) {
+            return getAgentKitToolId();
+        }
+        return toolId;
+    }
+
     public static String getAgentKitService() {
         String service = System.getenv(AGENTKIT_TOOL_SERVICE);
         return StringUtils.isBlank(service) ? DEFAULT_AGENTKIT_SERVICE : service;
@@ -74,9 +86,27 @@ public class EnvUtil {
     public static String getAgentKitHost() {
         String host = System.getenv(AGENTKIT_TOOL_HOST);
         if (StringUtils.isBlank(host)) {
+            if ("byteplus".equalsIgnoreCase(getCloudProvider())) {
+                return getAgentKitService() + "." + getAgentKitRegion() + ".bytepluses.com";
+            }
             return getAgentKitService() + "." + getAgentKitRegion() + ".volces.com";
         }
         return host;
+    }
+
+    public static String getAgentKitManagementHost() {
+        if ("byteplus".equalsIgnoreCase(getCloudProvider())) {
+            String bytePlusHost = System.getenv(BYTEPLUS_AGENTKIT_HOST);
+            if (StringUtils.isNotBlank(bytePlusHost)) {
+                return bytePlusHost;
+            }
+            return getAgentKitService() + "." + getAgentKitRegion() + ".byteplusapi.com";
+        }
+        String host = System.getenv(VOLCENGINE_AGENTKIT_HOST);
+        if (StringUtils.isBlank(host)) {
+            host = System.getenv(VOLC_AGENTKIT_HOST);
+        }
+        return StringUtils.isBlank(host) ? "open.volcengineapi.com" : host;
     }
 
     public static String getAgentApiKey() {

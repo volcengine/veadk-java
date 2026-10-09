@@ -301,6 +301,16 @@ class AgentTest {
     }
 
     @Test
+    void closeClosesAutoCloseableModel() {
+        TestLlm model = new TestLlm("closeable-model");
+        Agent agent = Agent.builder().name("closeable_agent").model(model).build();
+
+        agent.close().blockingAwait();
+
+        assertThat(model.closed()).isTrue();
+    }
+
+    @Test
     void localSkillDirectoryMountsSkillToolset(@TempDir Path tempDir) throws IOException {
         Path skillDir =
                 writeSkill(
@@ -594,10 +604,88 @@ class AgentTest {
     }
 
     @Test
-    void nonLocalSkillsModeStillFailsFast() {
-        assertThatThrownBy(() -> Agent.builder().skillsMode("skills_sandbox"))
+    void skillsSandboxModeKeepsSkillsRemoteAndDoesNotMountLocalSkillToolset() {
+        Agent agent =
+                Agent.builder()
+                        .name("remote_skill_agent")
+                        .model(new TestLlm("remote-skill-model"))
+                        .skills("ss-expense-review")
+                        .skillsMode("skills_sandbox")
+                        .tools(new TestTool("execute_skills"))
+                        .build();
+
+        assertThat(canonicalToolNames(agent)).containsExactly("execute_skills");
+        assertThat(agent.metadataSnapshot().explicitToolNames()).containsExactly("execute_skills");
+        assertThat(agent.metadataSnapshot().autoToolNames()).isEmpty();
+    }
+
+    @Test
+    void skillsSandboxModeCanBeConfiguredBeforeSkills() {
+        Agent agent =
+                Agent.builder()
+                        .name("remote_skill_order_agent")
+                        .model(new TestLlm("remote-skill-order-model"))
+                        .skillsMode("skills_sandbox")
+                        .skills("ss-expense-review")
+                        .tools(new TestTool("execute_skills"))
+                        .build();
+
+        assertThat(canonicalToolNames(agent)).containsExactly("execute_skills");
+        assertThat(agent.metadataSnapshot().autoToolNames()).isEmpty();
+    }
+
+    @Test
+    void invalidSkillsSandboxSourcesFailFast(@TempDir Path tempDir) {
+        assertThatThrownBy(
+                        () ->
+                                Agent.builder()
+                                        .name("missing_remote_skill_agent")
+                                        .model(new TestLlm("remote-skill-model"))
+                                        .skillsMode("skills_sandbox")
+                                        .build())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("skills must contain at least one Skill Space ID");
+
+        assertThatThrownBy(
+                        () ->
+                                Agent.builder()
+                                        .name("local_path_remote_skill_agent")
+                                        .model(new TestLlm("remote-skill-model"))
+                                        .skills(tempDir)
+                                        .skillsMode("skills_sandbox")
+                                        .build())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining(
+                        "skills_sandbox skills entries must be Skill Space ID strings");
+
+        assertThatThrownBy(
+                        () ->
+                                Agent.builder()
+                                        .name("bad_remote_skill_agent")
+                                        .model(new TestLlm("remote-skill-model"))
+                                        .skills("not-a-skill-space")
+                                        .skillsMode("skills_sandbox")
+                                        .build())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("skills_sandbox skill space ID must start with ss-");
+
+        assertThatThrownBy(
+                        () ->
+                                Agent.builder()
+                                        .name("no_execute_skills_agent")
+                                        .model(new TestLlm("remote-skill-model"))
+                                        .skills("ss-expense-review")
+                                        .skillsMode("skills_sandbox")
+                                        .build())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("skills_sandbox requires an explicit execute_skills tool.");
+    }
+
+    @Test
+    void unknownSkillsModeStillFailsFast() {
+        assertThatThrownBy(() -> Agent.builder().skillsMode("aio_sandbox"))
                 .isInstanceOf(UnsupportedOperationException.class)
-                .hasMessageContaining("skillsMode=skills_sandbox is not supported");
+                .hasMessageContaining("skillsMode=aio_sandbox is not supported");
     }
 
     @Test
@@ -607,7 +695,9 @@ class AgentTest {
                 .hasMessageContaining("runtime is not supported");
     }
 
-    private static final class TestLlm extends BaseLlm {
+    private static final class TestLlm extends BaseLlm implements AutoCloseable {
+        private boolean closed;
+
         private TestLlm(String model) {
             super(model);
         }
@@ -620,6 +710,15 @@ class AgentTest {
         @Override
         public BaseLlmConnection connect(LlmRequest llmRequest) {
             throw new UnsupportedOperationException("connect is not used in this test.");
+        }
+
+        @Override
+        public void close() {
+            closed = true;
+        }
+
+        private boolean closed() {
+            return closed;
         }
     }
 

@@ -17,34 +17,34 @@ package com.volcengine.veadk.example;
 
 import com.volcengine.veadk.Agent;
 import com.volcengine.veadk.Runner;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.util.List;
+import com.volcengine.veadk.tools.sandbox.ExecuteSkillsTool;
 
-/** Demonstrates local skills with a realistic employee expense pre-review workflow. */
-public class LocalSkillsExpenseReviewAgent {
+/** Demonstrates delegating an expense pre-review workflow to a remote Skills Sandbox. */
+public class RemoteSkillsExpenseReviewAgent {
 
     private static final String MODEL_NAME = "doubao-seed-2-1-pro-260628";
 
     public static void main(String[] args) {
-        Path skillsRoot = resolveSkillsRoot();
+        String skillSpaceId = requiredEnv("SKILL_SPACE_ID");
 
         Agent agent =
                 Agent.builder()
-                        .name("expense_review_assistant")
+                        .name("remote_expense_review_assistant")
                         .description(
-                                "Pre-reviews employee expense claims against local policy skills.")
+                                "Delegates employee expense pre-review requests to a remote skill"
+                                        + " space.")
                         .instruction(
                                 """
-                                你是企业财务共享中心的报销预审助手。
-                                当用户咨询报销、差旅、招待、礼品或发票问题时，先加载本地
-                                expense-policy-reviewer skill，再基于其中的规则回答。
-                                不要编造未在 skill 中出现的公司制度；遇到缺失信息要明确列出。
-                                输出中文，语气专业、清晰、可直接用于提交报销说明。
+                                你是企业财务共享中心的报销预审助手，但你不能直接执行技能。
+                                收到用户请求后，必须调用 execute_skills 工具，把用户的完整请求交给
+                                Skills Sandbox 中的 Agent 处理。
+                                即使用户只是询问当前有哪些技能，也必须先调用 execute_skills。
+                                最终用中文输出，说明可报销项、需补材料项、需审批项和风险点。
                                 """)
                         .modelName(MODEL_NAME)
-                        .skills(skillsRoot)
-                        .skillsMode("local")
+                        .skills(skillSpaceId)
+                        .skillsMode("skills_sandbox")
+                        .tools(new ExecuteSkillsTool())
                         .build();
 
         try {
@@ -59,7 +59,7 @@ public class LocalSkillsExpenseReviewAgent {
                     请判断哪些能直接报销、哪些需要补审批或补材料、哪些可能不能报。
                     """;
 
-            System.out.println("Local skills root: " + skillsRoot);
+            System.out.println("Remote skill space: " + skillSpaceId);
             System.out.println("User request:");
             System.out.println(prompt);
             System.out.println("Agent answer:");
@@ -69,19 +69,14 @@ public class LocalSkillsExpenseReviewAgent {
         }
     }
 
-    private static Path resolveSkillsRoot() {
-        List<Path> candidates =
-                List.of(
-                        Path.of("example", "src", "main", "resources", "skills"),
-                        Path.of("src", "main", "resources", "skills"));
-        return candidates.stream()
-                .filter(Files::isDirectory)
-                .findFirst()
-                .map(path -> path.toAbsolutePath().normalize())
-                .orElseThrow(
-                        () ->
-                                new IllegalStateException(
-                                        "Cannot find local skills root. Run from the repository"
-                                                + " root or from the example module."));
+    private static String requiredEnv(String name) {
+        String value = System.getenv(name);
+        if (value == null || value.isBlank()) {
+            throw new IllegalStateException(
+                    "Missing required configuration: "
+                            + name
+                            + ". Please configure the environment variable before startup.");
+        }
+        return value;
     }
 }

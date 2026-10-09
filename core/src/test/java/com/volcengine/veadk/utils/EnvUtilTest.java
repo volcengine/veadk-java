@@ -46,6 +46,37 @@ class EnvUtilTest {
     }
 
     @Test
+    @SetEnvironmentVariable(key = "AGENTKIT_TOOL_ID_SKILLS", value = "skills-tool-id")
+    @SetEnvironmentVariable(key = "AGENTKIT_TOOL_ID", value = "generic-tool-id")
+    void getAgentKitSkillsToolId_prefersSkillsToolId() {
+        assertThat(EnvUtil.getAgentKitSkillsToolId()).isEqualTo("skills-tool-id");
+    }
+
+    @Test
+    @ClearEnvironmentVariable(key = "AGENTKIT_TOOL_ID_SKILLS")
+    @SetEnvironmentVariable(key = "AGENTKIT_TOOL_ID", value = "generic-tool-id")
+    void getAgentKitSkillsToolId_fallsBackToGenericToolId() {
+        assertThat(EnvUtil.getAgentKitSkillsToolId()).isEqualTo("generic-tool-id");
+    }
+
+    @Test
+    @ClearEnvironmentVariable(key = "CLOUD_PROVIDER")
+    @ClearEnvironmentVariable(key = "VOLCENGINE_AGENTKIT_HOST")
+    @ClearEnvironmentVariable(key = "VOLC_AGENTKIT_HOST")
+    void getAgentKitManagementHost_volcengineDefault() {
+        assertThat(EnvUtil.getAgentKitManagementHost()).isEqualTo("open.volcengineapi.com");
+    }
+
+    @Test
+    @SetEnvironmentVariable(key = "CLOUD_PROVIDER", value = "byteplus")
+    @SetEnvironmentVariable(key = "AGENTKIT_TOOL_REGION", value = "ap-southeast-1")
+    @ClearEnvironmentVariable(key = "BYTEPLUS_AGENTKIT_HOST")
+    void getAgentKitManagementHost_byteplusDefault() {
+        assertThat(EnvUtil.getAgentKitManagementHost())
+                .isEqualTo("agentkit.ap-southeast-1.byteplusapi.com");
+    }
+
+    @Test
     @SetEnvironmentVariable(key = "VOLCENGINE_SECRET_KEY", value = "test_secret_key")
     void getSecretKey() {
         assertThat(EnvUtil.getSecretKey()).isEqualTo("test_secret_key");

@@ -42,6 +42,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
+import okhttp3.Dispatcher;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -93,6 +94,15 @@ class ArkLlmTest {
                                 .build());
 
         assertEquals("explicit-api-key", llm.config().getApiKey());
+    }
+
+    @Test
+    void closeShutsDownArkHttpResources() throws Exception {
+        arkLlm.close();
+
+        org.mockito.Mockito.verify(arkService).shutdownExecutor();
+        Dispatcher dispatcher = (Dispatcher) getField(arkLlm, "dispatcher");
+        assertTrue(dispatcher.executorService().isShutdown());
     }
 
     @Test
@@ -265,6 +275,13 @@ class ArkLlmTest {
         Field field = ArkLlm.class.getDeclaredField("arkService");
         field.setAccessible(true);
         field.set(llm, arkService);
+    }
+
+    private Object getField(Object target, String name)
+            throws NoSuchFieldException, IllegalAccessException {
+        Field field = target.getClass().getDeclaredField(name);
+        field.setAccessible(true);
+        return field.get(target);
     }
 
     private ChatCompletionResult createMockToolCallResult(List<ChatToolCall> toolCalls) {

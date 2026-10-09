@@ -44,8 +44,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+import okhttp3.ConnectionPool;
+import okhttp3.Dispatcher;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -56,7 +59,7 @@ import org.slf4j.LoggerFactory;
  * <p>This adapter maps ADK's LlmRequest/LlmResponse to Ark Responses API semantics and supports
  * both streaming and aggregated (non-streaming) generation.
  */
-public final class ArkLlm extends BaseLlm {
+public final class ArkLlm extends BaseLlm implements AutoCloseable {
 
     private static final Logger log = LoggerFactory.getLogger(ArkLlm.class);
 
@@ -69,6 +72,8 @@ public final class ArkLlm extends BaseLlm {
                     .build();
 
     private final ArkService arkService;
+    private final Dispatcher dispatcher;
+    private final ConnectionPool connectionPool;
     private final ArkLlmConfig config;
     private ChatCompletionRequest.ChatCompletionRequestThinking thinking = null;
 
@@ -83,7 +88,13 @@ public final class ArkLlm extends BaseLlm {
     public ArkLlm(ArkLlmConfig config) {
         super(Objects.requireNonNull(config, "config must be set.").getModelName());
         this.config = config;
-        ArkService.Builder arkServiceBuilder = ArkService.builder().apiKey(config.getApiKey());
+        this.dispatcher = new Dispatcher();
+        this.connectionPool = new ConnectionPool(5, 1, TimeUnit.SECONDS);
+        ArkService.Builder arkServiceBuilder =
+                ArkService.builder()
+                        .apiKey(config.getApiKey())
+                        .dispatcher(dispatcher)
+                        .connectionPool(connectionPool);
         if (StringUtils.isNotBlank(config.getApiBase())) {
             arkServiceBuilder.baseUrl(config.getApiBase());
         }
@@ -96,6 +107,19 @@ public final class ArkLlm extends BaseLlm {
 
     public ArkLlmConfig config() {
         return config;
+    }
+
+    @Override
+    public void close() {
+        dispatcher.cancelAll();
+        connectionPool.evictAll();
+        arkService.shutdownExecutor();
+        dispatcher.executorService().shutdownNow();
+        try {
+            dispatcher.executorService().awaitTermination(5, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     /**
