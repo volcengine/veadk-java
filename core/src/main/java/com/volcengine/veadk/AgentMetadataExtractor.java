@@ -64,7 +64,7 @@ public final class AgentMetadataExtractor {
                     agent instanceof Agent,
                     List.of(),
                     List.of(),
-                    reservedComponents(false, false, false),
+                    reservedComponents(false, false, false, false),
                     searchSources(false, false, false));
         }
 
@@ -95,7 +95,11 @@ public final class AgentMetadataExtractor {
                 true,
                 tools,
                 subAgents(agent, id, currentPath),
-                components(snapshot.hasKnowledgebase(), snapshot.hasLongTermMemory(), hasToolset),
+                components(
+                        snapshot.hasKnowledgebase(),
+                        snapshot.hasLongTermMemory(),
+                        snapshot.hasShortTermMemory(),
+                        hasToolset),
                 searchSources(
                         snapshot.hasKnowledgebase(), snapshot.hasLongTermMemory(), hasWebSearch));
     }
@@ -126,7 +130,7 @@ public final class AgentMetadataExtractor {
                 false,
                 tools,
                 subAgents(agent, id, currentPath),
-                components(hasKnowledgebase, hasLongTermMemory, hasToolset),
+                components(hasKnowledgebase, hasLongTermMemory, false, hasToolset),
                 searchSources(hasKnowledgebase, hasLongTermMemory, hasWebSearch));
     }
 
@@ -170,20 +174,27 @@ public final class AgentMetadataExtractor {
     }
 
     private static List<AgentMetadata.ComponentMetadata> components(
-            boolean hasKnowledgebase, boolean hasLongTermMemory, boolean hasToolset) {
+            boolean hasKnowledgebase,
+            boolean hasLongTermMemory,
+            boolean hasShortTermMemory,
+            boolean hasToolset) {
         return List.of(
                 new AgentMetadata.ComponentMetadata(
                         "knowledgebase", "knowledgebase", hasKnowledgebase),
                 new AgentMetadata.ComponentMetadata("longTermMemory", "memory", hasLongTermMemory),
-                new AgentMetadata.ComponentMetadata("shortTermMemory", "session", false),
+                new AgentMetadata.ComponentMetadata(
+                        "shortTermMemory", "session", hasShortTermMemory),
                 new AgentMetadata.ComponentMetadata("tracer", "observability", false),
                 new AgentMetadata.ComponentMetadata("toolset", "tools", hasToolset),
                 new AgentMetadata.ComponentMetadata("plugin", "runtime", false));
     }
 
     private static List<AgentMetadata.ComponentMetadata> reservedComponents(
-            boolean hasKnowledgebase, boolean hasLongTermMemory, boolean hasToolset) {
-        return components(hasKnowledgebase, hasLongTermMemory, hasToolset);
+            boolean hasKnowledgebase,
+            boolean hasLongTermMemory,
+            boolean hasShortTermMemory,
+            boolean hasToolset) {
+        return components(hasKnowledgebase, hasLongTermMemory, hasShortTermMemory, hasToolset);
     }
 
     private static List<AgentMetadata.SearchSourceMetadata> searchSources(

@@ -28,15 +28,56 @@ Agent agent = Agent.builder()
     .name("quickstart-agent")
     .description("Answers user questions.")
     .instruction("You are a helpful assistant.")
-    .modelName("doubao-seed-2-1-pro-260628")
+    .model("doubao-seed-2-1-pro-260628")
     .modelApiKey(System.getenv("MODEL_AGENT_API_KEY"))
     .build();
 ```
 
-`modelName(...)` creates a default `ArkLlm` at build time. Configure the Ark API
-key with `modelApiKey(...)`, or leave it unset to resolve credentials from the
-environment. Use `modelApiBase(...)` / `modelBaseUrl(...)` when you need a
-custom Ark endpoint.
+Without an explicit provider, VeADK follows veadk-python and uses the
+OpenAI-compatible path by default. Configure the API key with `modelApiKey(...)`,
+or leave it unset to read `MODEL_AGENT_API_KEY` from the environment. The
+default base URL is Ark's OpenAI-compatible endpoint; use `modelApiBase(...)` /
+`modelBaseUrl(...)` when you need OpenAI official, LiteLLM Proxy, or another
+compatible gateway.
+
+OpenAI-compatible endpoints are configured the same way, without requiring
+application code to construct an ADK `BaseLlm`:
+
+```java
+Agent agent = Agent.builder()
+    .name("openai-agent")
+    .instruction("You are a helpful assistant.")
+    .model("openai/gpt-4o")
+    .modelApiKey(System.getenv("OPENAI_API_KEY"))
+    .modelBaseUrl("https://api.openai.com/v1")
+    .build();
+```
+
+Use `modelProvider("ark")` only when you want the Ark-specific `ArkLlm` adapter:
+
+```java
+Agent agent = Agent.builder()
+    .name("ark-agent")
+    .modelProvider("ark")
+    .model("doubao-seed-2-1-pro-260628")
+    .modelApiKey(System.getenv("MODEL_AGENT_API_KEY"))
+    .modelApiBase("https://ark.cn-beijing.volces.com/api/v3")
+    .build();
+```
+
+For LiteLLM Proxy or an internal OpenAI-compatible gateway, set the base URL to
+that endpoint. Use `modelProvider("openai")` when the model name itself contains
+provider routing text:
+
+```java
+Agent agent = Agent.builder()
+    .name("litellm-agent")
+    .modelProvider("openai")
+    .model("anthropic/claude-sonnet-4")
+    .modelApiKey(System.getenv("LITELLM_API_KEY"))
+    .modelBaseUrl("http://localhost:4000/v1")
+    .build();
+```
 
 You can also provide an explicit ADK `BaseLlm` instance when you want to own the
 model configuration yourself:
@@ -188,6 +229,31 @@ explain the failure or decide whether to retry:
 }
 ```
 
+#### Short-Term Memory
+
+Short-term memory is session-scoped context. Configure it on the agent, then
+reuse the same `userId` and `sessionId` when running follow-up turns:
+
+```java
+import com.volcengine.veadk.Agent;
+import com.volcengine.veadk.Runner;
+import com.volcengine.veadk.memory.ShortTermMemory;
+
+ShortTermMemory shortTermMemory = ShortTermMemory.builder().local().build();
+
+Agent agent = Agent.builder()
+    .name("memory_agent")
+    .instruction("Remember what the user tells you.")
+    .modelName("doubao-seed-2-1-pro-260628")
+    .shortTermMemory(shortTermMemory)
+    .build();
+
+Runner runner = new Runner(agent, "memory_demo");
+
+runner.run("user_1", "session_1", "My name is Ming.");
+runner.run("user_1", "session_1", "What is my name?");
+```
+
 The extracted metadata includes:
 
 - Basic agent fields: `id`, `name`, `description`, `instructionSummary`, `modelName`,
@@ -204,11 +270,13 @@ The extracted metadata includes:
   are `web_search`, `loadKnowledgebase`, and `loadMemory`.
 
 ### Model Credentials
-Examples that instantiate or call `ArkLlm` need model credentials. The
+Examples that auto-create a model adapter or call `ArkLlm` need model credentials. The
 resolution order is:
 
 - `modelApiKey(...)`: explicit API key on the builder.
-- `MODEL_AGENT_API_KEY`: raw Ark API key from the environment.
+- `MODEL_AGENT_API_KEY`: raw model API key from the environment.
+- `MODEL_AGENT_API_KEY_ID`: Ark API key ID. When set, VeADK resolves the raw key
+  through Ark OpenAPI.
 - `MODEL_AGENT_API_KEY_NAME`: Ark API key name. When set, VeADK resolves the raw
   key through Ark OpenAPI.
 - Volcengine AK/SK fallback: when no key value or key name is configured, VeADK
@@ -220,6 +288,7 @@ Ark OpenAPI fallback requires:
 - `VOLCENGINE_SECRET_KEY`
 - Optional: `VOLCENGINE_SESSION_TOKEN` or `VOLC_SESSIONTOKEN`
 - Optional: `REGION`, defaulting to `cn-beijing`
+- Optional: `MODEL_AGENT_PROJECT_NAME`, defaulting to `default`
 - Optional: `CLOUD_PROVIDER=byteplus` for BytePlus control-plane routing
  
 Example setup (macOS / Linux):

@@ -28,9 +28,39 @@ class EnvUtilTest {
     }
 
     @Test
+    @SetEnvironmentVariable(key = "MODEL_AGENT_API_KEY_ID", value = " test_api_key_id ")
+    void getModelAgentApiKeyId() {
+        assertThat(EnvUtil.getModelAgentApiKeyId()).isEqualTo("test_api_key_id");
+    }
+
+    @Test
+    @SetEnvironmentVariable(key = "MODEL_AGENT_API_KEY_NAME", value = " test_api_key_name ")
+    void getModelAgentApiKeyName() {
+        assertThat(EnvUtil.getModelAgentApiKeyName()).isEqualTo("test_api_key_name");
+    }
+
+    @Test
     @ClearEnvironmentVariable(key = "MODEL_AGENT_API_KEY")
     void getAgentApiKey_withMissingEnv_shouldThrowException() {
         assertThatThrownBy(EnvUtil::getAgentApiKey).isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    @ClearEnvironmentVariable(key = "MODEL_AGENT_PROJECT_NAME")
+    void getModelAgentProjectName_withMissingEnv_shouldReturnDefault() {
+        assertThat(EnvUtil.getModelAgentProjectName()).isEqualTo("default");
+    }
+
+    @Test
+    @SetEnvironmentVariable(key = "MODEL_AGENT_PROJECT_NAME", value = "agent_project")
+    void getModelAgentProjectName() {
+        assertThat(EnvUtil.getModelAgentProjectName()).isEqualTo("agent_project");
+    }
+
+    @Test
+    @SetEnvironmentVariable(key = "CLOUD_PROVIDER", value = " byteplus ")
+    void getCloudProvider() {
+        assertThat(EnvUtil.getCloudProvider()).isEqualTo("byteplus");
     }
 
     @Test
@@ -127,12 +157,6 @@ class EnvUtilTest {
     @SetEnvironmentVariable(key = "VOLC_SESSIONTOKEN", value = "legacy-session-token")
     void getSessionToken_fallsBackToLegacySessionToken() {
         assertThat(EnvUtil.getSessionToken()).isEqualTo("legacy-session-token");
-    }
-
-    @Test
-    @SetEnvironmentVariable(key = "CLOUD_PROVIDER", value = "byteplus")
-    void getCloudProvider() {
-        assertThat(EnvUtil.getCloudProvider()).isEqualTo("byteplus");
     }
 
     @Test

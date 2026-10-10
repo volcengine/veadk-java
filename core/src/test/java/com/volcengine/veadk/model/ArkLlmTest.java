@@ -66,7 +66,7 @@ class ArkLlmTest {
     @BeforeEach
     void setUp() throws NoSuchFieldException, IllegalAccessException {
         try (MockedStatic<EnvUtil> mocked = mockStatic(EnvUtil.class)) {
-            mocked.when(EnvUtil::getOptionalAgentApiKey).thenReturn("test-api-key");
+            mocked.when(EnvUtil::getAgentApiKey).thenReturn("test-api-key");
             arkLlm = new ArkLlm("test-model");
         }
         Field field = ArkLlm.class.getDeclaredField("arkService");
@@ -108,19 +108,13 @@ class ArkLlmTest {
     @Test
     void missingEnvApiKeyFallsBackToArkOpenApiResolver() {
         try (MockedStatic<EnvUtil> env = mockStatic(EnvUtil.class);
-                MockedConstruction<ArkApiKeyResolver> resolver =
+                MockedConstruction<ArkApiKeyAuthClient> resolver =
                         Mockito.mockConstruction(
-                                ArkApiKeyResolver.class,
+                                ArkApiKeyAuthClient.class,
                                 (mock, context) ->
-                                        when(mock.resolve("named-key"))
-                                                .thenReturn("resolved-key"))) {
-            env.when(EnvUtil::getOptionalAgentApiKey).thenReturn("");
-            env.when(EnvUtil::getAccessKey).thenReturn("ak");
-            env.when(EnvUtil::getSecretKey).thenReturn("sk");
-            env.when(EnvUtil::getSessionToken).thenReturn("token");
-            env.when(EnvUtil::getRegion).thenReturn("cn-beijing");
-            env.when(EnvUtil::getCloudProvider).thenReturn("");
-            env.when(EnvUtil::getAgentApiKeyName).thenReturn("named-key");
+                                        when(mock.resolve()).thenReturn("resolved-key"))) {
+            env.when(EnvUtil::getAgentApiKey)
+                    .thenThrow(new IllegalStateException("MODEL_AGENT_API_KEY missing"));
 
             ArkLlmConfig config = ArkLlmConfig.builder().modelName("fallback-model").build();
 
@@ -131,6 +125,8 @@ class ArkLlmTest {
 
     @Test
     @ClearEnvironmentVariable(key = "MODEL_AGENT_API_KEY")
+    @ClearEnvironmentVariable(key = "MODEL_AGENT_API_KEY_ID")
+    @ClearEnvironmentVariable(key = "MODEL_AGENT_API_KEY_NAME")
     @ClearEnvironmentVariable(key = "VOLCENGINE_ACCESS_KEY")
     @ClearEnvironmentVariable(key = "VOLCENGINE_SECRET_KEY")
     void missingApiKeyFailsWithClearMessage() {

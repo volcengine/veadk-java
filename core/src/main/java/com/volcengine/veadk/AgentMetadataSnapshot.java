@@ -29,6 +29,7 @@ public final class AgentMetadataSnapshot {
     private final List<String> autoToolNames;
     private final boolean hasKnowledgebase;
     private final boolean hasLongTermMemory;
+    private final boolean hasShortTermMemory;
     private final boolean autoSaveSession;
 
     public AgentMetadataSnapshot(
@@ -40,6 +41,7 @@ public final class AgentMetadataSnapshot {
             List<String> autoToolNames,
             boolean hasKnowledgebase,
             boolean hasLongTermMemory,
+            boolean hasShortTermMemory,
             boolean autoSaveSession) {
         this.name = Objects.requireNonNullElse(name, "");
         this.description = Objects.requireNonNullElse(description, "");
@@ -49,6 +51,7 @@ public final class AgentMetadataSnapshot {
         this.autoToolNames = List.copyOf(Objects.requireNonNull(autoToolNames));
         this.hasKnowledgebase = hasKnowledgebase;
         this.hasLongTermMemory = hasLongTermMemory;
+        this.hasShortTermMemory = hasShortTermMemory;
         this.autoSaveSession = autoSaveSession;
     }
 
@@ -82,6 +85,10 @@ public final class AgentMetadataSnapshot {
 
     public boolean hasLongTermMemory() {
         return hasLongTermMemory;
+    }
+
+    public boolean hasShortTermMemory() {
+        return hasShortTermMemory;
     }
 
     public boolean autoSaveSession() {

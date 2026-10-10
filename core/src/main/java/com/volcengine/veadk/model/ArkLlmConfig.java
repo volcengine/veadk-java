@@ -64,17 +64,24 @@ public final class ArkLlmConfig {
         if (StringUtils.isNotBlank(explicitApiKey)) {
             return explicitApiKey.trim();
         }
-        String envApiKey = EnvUtil.getOptionalAgentApiKey();
-        if (StringUtils.isNotBlank(envApiKey)) {
-            return envApiKey.trim();
+        try {
+            return EnvUtil.getAgentApiKey();
+        } catch (IllegalStateException missingApiKey) {
+            try {
+                return new ArkApiKeyAuthClient().resolve();
+            } catch (RuntimeException missingAkSkOrResolveFailed) {
+                IllegalStateException exception =
+                        new IllegalStateException(
+                                "Missing required configuration: MODEL_AGENT_API_KEY, or"
+                                    + " VOLCENGINE_ACCESS_KEY/VOLCENGINE_SECRET_KEY for resolving"
+                                    + " an Ark API key via MODEL_AGENT_API_KEY_ID,"
+                                    + " MODEL_AGENT_API_KEY_NAME, or the first available Ark API"
+                                    + " key.",
+                                missingAkSkOrResolveFailed);
+                exception.addSuppressed(missingApiKey);
+                throw exception;
+            }
         }
-        return new ArkApiKeyResolver(
-                        EnvUtil.getAccessKey(),
-                        EnvUtil.getSecretKey(),
-                        EnvUtil.getSessionToken(),
-                        EnvUtil.getRegion(),
-                        EnvUtil.getCloudProvider())
-                .resolve(EnvUtil.getAgentApiKeyName());
     }
 
     private static String resolveApiBase(String explicitApiBase) {
