@@ -16,6 +16,18 @@ class EnvUtilTest {
     }
 
     @Test
+    @SetEnvironmentVariable(key = "MODEL_AGENT_API_KEY", value = "test_api_key")
+    void getOptionalAgentApiKey() {
+        assertThat(EnvUtil.getOptionalAgentApiKey()).isEqualTo("test_api_key");
+    }
+
+    @Test
+    @SetEnvironmentVariable(key = "MODEL_AGENT_API_KEY_NAME", value = "default-key")
+    void getAgentApiKeyName() {
+        assertThat(EnvUtil.getAgentApiKeyName()).isEqualTo("default-key");
+    }
+
+    @Test
     @SetEnvironmentVariable(key = "MODEL_AGENT_API_KEY_ID", value = " test_api_key_id ")
     void getModelAgentApiKeyId() {
         assertThat(EnvUtil.getModelAgentApiKeyId()).isEqualTo("test_api_key_id");
@@ -64,6 +76,65 @@ class EnvUtilTest {
     }
 
     @Test
+    @SetEnvironmentVariable(key = "AGENTKIT_TOOL_ID_SKILLS", value = "skills-tool-id")
+    @SetEnvironmentVariable(key = "AGENTKIT_TOOL_ID", value = "generic-tool-id")
+    void getAgentKitSkillsToolId_prefersSkillsToolId() {
+        assertThat(EnvUtil.getAgentKitSkillsToolId()).isEqualTo("skills-tool-id");
+    }
+
+    @Test
+    @ClearEnvironmentVariable(key = "AGENTKIT_TOOL_ID_SKILLS")
+    @SetEnvironmentVariable(key = "AGENTKIT_TOOL_ID", value = "generic-tool-id")
+    void getAgentKitSkillsToolId_fallsBackToGenericToolId() {
+        assertThat(EnvUtil.getAgentKitSkillsToolId()).isEqualTo("generic-tool-id");
+    }
+
+    @Test
+    @ClearEnvironmentVariable(key = "CLOUD_PROVIDER")
+    @ClearEnvironmentVariable(key = "VOLCENGINE_AGENTKIT_HOST")
+    @ClearEnvironmentVariable(key = "VOLC_AGENTKIT_HOST")
+    void getAgentKitManagementHost_volcengineDefault() {
+        assertThat(EnvUtil.getAgentKitManagementHost()).isEqualTo("open.volcengineapi.com");
+    }
+
+    @Test
+    @SetEnvironmentVariable(key = "CLOUD_PROVIDER", value = "byteplus")
+    @SetEnvironmentVariable(key = "AGENTKIT_TOOL_REGION", value = "ap-southeast-1")
+    @ClearEnvironmentVariable(key = "BYTEPLUS_AGENTKIT_HOST")
+    void getAgentKitManagementHost_byteplusDefault() {
+        assertThat(EnvUtil.getAgentKitManagementHost())
+                .isEqualTo("agentkit.ap-southeast-1.byteplusapi.com");
+    }
+
+    @Test
+    @ClearEnvironmentVariable(key = "SKILLHUB_SERVICE_NAME")
+    @ClearEnvironmentVariable(key = "SKILLHUB_REGION")
+    @ClearEnvironmentVariable(key = "SKILLHUB_HOST")
+    @ClearEnvironmentVariable(key = "SKILLHUB_TOP_SCHEME")
+    @ClearEnvironmentVariable(key = "SKILLHUB_LIST_SKILLS_PAGE_SIZE")
+    void getSkillHubDefaults() {
+        assertThat(EnvUtil.getSkillHubService()).isEqualTo("skillhub");
+        assertThat(EnvUtil.getSkillHubRegion()).isEqualTo("cn-guilin-boe");
+        assertThat(EnvUtil.getSkillHubHost()).isEqualTo("skills.volces.com");
+        assertThat(EnvUtil.getSkillHubScheme()).isEqualTo("https");
+        assertThat(EnvUtil.getSkillHubListSkillsPageSize()).isEqualTo(100);
+    }
+
+    @Test
+    @SetEnvironmentVariable(key = "SKILLHUB_SERVICE_NAME", value = "custom-skillhub")
+    @SetEnvironmentVariable(key = "SKILLHUB_REGION", value = "cn-test")
+    @SetEnvironmentVariable(key = "SKILLHUB_HOST", value = "skillhub.example.com")
+    @SetEnvironmentVariable(key = "SKILLHUB_TOP_SCHEME", value = "HTTP")
+    @SetEnvironmentVariable(key = "SKILLHUB_LIST_SKILLS_PAGE_SIZE", value = "20")
+    void getSkillHubOverrides() {
+        assertThat(EnvUtil.getSkillHubService()).isEqualTo("custom-skillhub");
+        assertThat(EnvUtil.getSkillHubRegion()).isEqualTo("cn-test");
+        assertThat(EnvUtil.getSkillHubHost()).isEqualTo("skillhub.example.com");
+        assertThat(EnvUtil.getSkillHubScheme()).isEqualTo("http");
+        assertThat(EnvUtil.getSkillHubListSkillsPageSize()).isEqualTo(20);
+    }
+
+    @Test
     @SetEnvironmentVariable(key = "VOLCENGINE_SECRET_KEY", value = "test_secret_key")
     void getSecretKey() {
         assertThat(EnvUtil.getSecretKey()).isEqualTo("test_secret_key");
@@ -73,6 +144,19 @@ class EnvUtilTest {
     @ClearEnvironmentVariable(key = "VOLCENGINE_SECRET_KEY")
     void getSecretKey_withMissingEnv_shouldThrowException() {
         assertThatThrownBy(EnvUtil::getSecretKey).isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    @SetEnvironmentVariable(key = "VOLCENGINE_SESSION_TOKEN", value = "session-token")
+    void getSessionToken_prefersVolcengineSessionToken() {
+        assertThat(EnvUtil.getSessionToken()).isEqualTo("session-token");
+    }
+
+    @Test
+    @ClearEnvironmentVariable(key = "VOLCENGINE_SESSION_TOKEN")
+    @SetEnvironmentVariable(key = "VOLC_SESSIONTOKEN", value = "legacy-session-token")
+    void getSessionToken_fallsBackToLegacySessionToken() {
+        assertThat(EnvUtil.getSessionToken()).isEqualTo("legacy-session-token");
     }
 
     @Test

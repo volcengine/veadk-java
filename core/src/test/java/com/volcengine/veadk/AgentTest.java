@@ -26,9 +26,12 @@ import com.google.adk.models.BaseLlm;
 import com.google.adk.models.BaseLlmConnection;
 import com.google.adk.models.LlmRequest;
 import com.google.adk.models.LlmResponse;
+import com.google.adk.skills.ClassPathSkillSource;
+import com.google.adk.skills.LocalSkillSource;
 import com.google.adk.tools.BaseTool;
 import com.google.adk.tools.LoadMemoryTool;
 import com.google.adk.tools.ToolContext;
+import com.google.adk.tools.skills.SkillToolset;
 import com.volcengine.veadk.knowledgebase.BaseKnowledgebaseService;
 import com.volcengine.veadk.knowledgebase.KnowledgebaseEntry;
 import com.volcengine.veadk.knowledgebase.SearchKnowledgebaseResponse;
@@ -38,14 +41,18 @@ import com.volcengine.veadk.model.ArkLlm;
 import com.volcengine.veadk.model.ArkLlmConfig;
 import com.volcengine.veadk.model.ModelProvider;
 import com.volcengine.veadk.model.OpenAiCompatibleLlm;
-import com.volcengine.veadk.tools.knowledgebase.LoadKnowledgebaseTool;
+import com.volcengine.veadk.tools.builtin.knowledgebase.LoadKnowledgebaseTool;
 import io.reactivex.rxjava3.core.Flowable;
 import io.reactivex.rxjava3.core.Maybe;
 import io.reactivex.rxjava3.core.Single;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.junitpioneer.jupiter.ClearEnvironmentVariable;
 import org.junitpioneer.jupiter.SetEnvironmentVariable;
 
@@ -253,6 +260,8 @@ class AgentTest {
 
     @Test
     @ClearEnvironmentVariable(key = "MODEL_AGENT_API_KEY")
+    @ClearEnvironmentVariable(key = "VOLCENGINE_ACCESS_KEY")
+    @ClearEnvironmentVariable(key = "VOLCENGINE_SECRET_KEY")
     void missingModelApiKeyFailsFastWhenAutoCreatingModel() {
         assertThatThrownBy(
                         () ->
@@ -439,13 +448,418 @@ class AgentTest {
     }
 
     @Test
+    void closeClosesAutoCloseableModel() {
+        TestLlm model = new TestLlm("closeable-model");
+        Agent agent = Agent.builder().name("closeable_agent").model(model).build();
+
+        agent.close().blockingAwait();
+
+        assertThat(model.closed()).isTrue();
+    }
+
+    @Test
+    void closeClosesAutoCloseableExplicitTools() {
+        CloseableTestTool tool = new CloseableTestTool("closeable_tool");
+        Agent agent =
+                Agent.builder()
+                        .name("closeable_tool_agent")
+                        .model(new TestLlm("closeable-tool-model"))
+                        .tools(tool)
+                        .build();
+
+        agent.close().blockingAwait();
+
+        assertThat(tool.closed()).isTrue();
+    }
+
+    @Test
+    void localSkillDirectoryMountsSkillToolset(@TempDir Path tempDir) throws IOException {
+        Path skillDir =
+                writeSkill(
+                        tempDir,
+                        "expense-policy-reviewer",
+                        "Review employee reimbursement requests.",
+                        "Follow the company expense policy.");
+
+        Agent agent =
+                Agent.builder()
+                        .name("skill_agent")
+                        .model(new TestLlm("skill-model"))
+                        .skills(skillDir)
+                        .build();
+
+        assertThat(canonicalToolNames(agent))
+                .contains("list_skills", "load_skill", "load_skill_resource");
+        assertThat(agent.metadataSnapshot().autoToolNames()).containsExactly("SkillToolset");
+
+        Map<String, Object> result =
+                findTool(agent, "load_skill")
+                        .runAsync(
+                                Map.of("skill_name", "expense-policy-reviewer"),
+                                mock(ToolContext.class))
+                        .blockingGet();
+        assertThat(result).containsEntry("skill_name", "expense-policy-reviewer");
+        assertThat((String) result.get("instructions"))
+                .contains("Follow the company expense policy.");
+    }
+
+    @Test
+    void localSkillFilePathMountsSingleSkill(@TempDir Path tempDir) throws IOException {
+        Path skillDir =
+                writeSkill(
+                        tempDir,
+                        "expense-policy-reviewer",
+                        "Review employee reimbursement requests.",
+                        "Load from a SKILL.md file path.");
+
+        Agent agent =
+                Agent.builder()
+                        .name("skill_file_agent")
+                        .model(new TestLlm("skill-file-model"))
+                        .skills(skillDir.resolve("SKILL.md"))
+                        .build();
+
+        Map<String, Object> result =
+                findTool(agent, "load_skill")
+                        .runAsync(
+                                Map.of("skill_name", "expense-policy-reviewer"),
+                                mock(ToolContext.class))
+                        .blockingGet();
+        assertThat((String) result.get("instructions")).contains("Load from a SKILL.md file path.");
+    }
+
+    @Test
+    void localSkillDirectorySupportsLowercaseSkillMd(@TempDir Path tempDir) throws IOException {
+        writeSkill(
+                tempDir,
+                "expense-policy-reviewer",
+                "Review employee reimbursement requests.",
+                "Lowercase skill file body.",
+                "skill.md");
+
+        Agent agent =
+                Agent.builder()
+                        .name("lowercase_skill_agent")
+                        .model(new TestLlm("lowercase-skill-model"))
+                        .skills(tempDir)
+                        .build();
+
+        Map<String, Object> result =
+                findTool(agent, "load_skill")
+                        .runAsync(
+                                Map.of("skill_name", "expense-policy-reviewer"),
+                                mock(ToolContext.class))
+                        .blockingGet();
+        assertThat((String) result.get("instructions")).contains("Lowercase skill file body.");
+    }
+
+    @Test
+    void localSkillsRootDirectoryWorks(@TempDir Path tempDir) throws IOException {
+        writeSkill(
+                tempDir,
+                "expense-policy-reviewer",
+                "Review employee reimbursement requests.",
+                "Expense policy body.");
+
+        Agent agent =
+                Agent.builder()
+                        .name("skills_root_agent")
+                        .model(new TestLlm("skills-root-model"))
+                        .skills(tempDir.toString())
+                        .skillsMode("local")
+                        .build();
+
+        Map<String, Object> result =
+                findTool(agent, "list_skills")
+                        .runAsync(Map.of(), mock(ToolContext.class))
+                        .blockingGet();
+        assertThat((String) result.get("skills_xml")).contains("expense-policy-reviewer");
+    }
+
+    @Test
+    void localSkillResourceCanBeLoaded(@TempDir Path tempDir) throws IOException {
+        Path skillDir =
+                writeSkill(
+                        tempDir,
+                        "expense-policy-reviewer",
+                        "Review employee reimbursement requests.",
+                        "Read the reimbursement policy reference.");
+        Path referencesDir = skillDir.resolve("references");
+        Files.createDirectories(referencesDir);
+        Files.writeString(referencesDir.resolve("policy.txt"), "Taxi after 21:00 is reimbursable.");
+
+        Agent agent =
+                Agent.builder()
+                        .name("skill_resource_agent")
+                        .model(new TestLlm("skill-resource-model"))
+                        .skills(skillDir)
+                        .build();
+
+        Map<String, Object> result =
+                findTool(agent, "load_skill_resource")
+                        .runAsync(
+                                Map.of(
+                                        "skill_name",
+                                        "expense-policy-reviewer",
+                                        "file_path",
+                                        "references/policy.txt"),
+                                mock(ToolContext.class))
+                        .blockingGet();
+
+        assertThat(result)
+                .containsEntry("skill_name", "expense-policy-reviewer")
+                .containsEntry("file_path", "references/policy.txt")
+                .containsEntry("content", "Taxi after 21:00 is reimbursable.");
+    }
+
+    @Test
+    void duplicateLocalSkillsUseLastConfiguredSource(@TempDir Path tempDir) throws IOException {
+        Path firstRoot = tempDir.resolve("first");
+        Path secondRoot = tempDir.resolve("second");
+        writeSkill(
+                firstRoot,
+                "expense-policy-reviewer",
+                "Old expense reviewer.",
+                "Use the old policy.");
+        writeSkill(
+                secondRoot,
+                "expense-policy-reviewer",
+                "New expense reviewer.",
+                "Use the new policy.");
+
+        Agent agent =
+                Agent.builder()
+                        .name("duplicate_skill_agent")
+                        .model(new TestLlm("duplicate-skill-model"))
+                        .skills(firstRoot, secondRoot)
+                        .build();
+
+        Map<String, Object> listResult =
+                findTool(agent, "list_skills")
+                        .runAsync(Map.of(), mock(ToolContext.class))
+                        .blockingGet();
+        assertThat((String) listResult.get("skills_xml"))
+                .contains("New expense reviewer.")
+                .doesNotContain("Old expense reviewer.");
+
+        Map<String, Object> loadResult =
+                findTool(agent, "load_skill")
+                        .runAsync(
+                                Map.of("skill_name", "expense-policy-reviewer"),
+                                mock(ToolContext.class))
+                        .blockingGet();
+        assertThat((String) loadResult.get("instructions")).contains("Use the new policy.");
+    }
+
+    @Test
+    void explicitClasspathSkillSourceWorks() {
+        Agent agent =
+                Agent.builder()
+                        .name("classpath_skill_agent")
+                        .model(new TestLlm("classpath-skill-model"))
+                        .skills(new ClassPathSkillSource("skills"))
+                        .build();
+
+        Map<String, Object> result =
+                findTool(agent, "load_skill")
+                        .runAsync(Map.of("skill_name", "classpath-policy"), mock(ToolContext.class))
+                        .blockingGet();
+        assertThat((String) result.get("instructions"))
+                .contains("This skill is loaded from test classpath resources.");
+    }
+
+    @Test
+    void explicitSkillToolsetIsNotDuplicated(@TempDir Path tempDir) throws IOException {
+        writeSkill(
+                tempDir,
+                "expense-policy-reviewer",
+                "Review employee reimbursement requests.",
+                "Expense policy body.");
+        SkillToolset explicitSkillToolset = new SkillToolset(new LocalSkillSource(tempDir));
+
+        Agent agent =
+                Agent.builder()
+                        .name("explicit_skill_toolset_agent")
+                        .model(new TestLlm("explicit-skill-model"))
+                        .tools(explicitSkillToolset)
+                        .skills(tempDir)
+                        .build();
+
+        assertThat(canonicalToolNames(agent))
+                .containsExactly("list_skills", "load_skill", "load_skill_resource");
+        assertThat(agent.metadataSnapshot().explicitToolNames()).containsExactly("SkillToolset");
+        assertThat(agent.metadataSnapshot().autoToolNames()).isEmpty();
+    }
+
+    @Test
+    void invalidLocalSkillPathsFailFast(@TempDir Path tempDir) throws IOException {
+        Path missingPath = tempDir.resolve("missing");
+        Path nonSkillFile = tempDir.resolve("notes.md");
+        Files.writeString(nonSkillFile, "not a skill");
+
+        assertThatThrownBy(
+                        () ->
+                                Agent.builder()
+                                        .name("missing_skill_agent")
+                                        .model(new TestLlm("missing-skill-model"))
+                                        .skills(missingPath)
+                                        .build())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("skill path does not exist")
+                .hasMessageContaining(missingPath.toAbsolutePath().normalize().toString());
+
+        assertThatThrownBy(
+                        () ->
+                                Agent.builder()
+                                        .name("non_skill_file_agent")
+                                        .model(new TestLlm("non-skill-file-model"))
+                                        .skills(nonSkillFile)
+                                        .build())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("skill file path must point to SKILL.md or skill.md");
+    }
+
+    @Test
+    void invalidSkillEntriesFailFast() {
+        assertThatThrownBy(
+                        () ->
+                                Agent.builder()
+                                        .name("blank_skill_path_agent")
+                                        .model(new TestLlm("blank-skill-path-model"))
+                                        .skills(" ")
+                                        .build())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("skill path must be set");
+
+        assertThatThrownBy(
+                        () ->
+                                Agent.builder()
+                                        .name("unsupported_skill_entry_agent")
+                                        .model(new TestLlm("unsupported-skill-entry-model"))
+                                        .skills(42)
+                                        .build())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("skills entries must be String, Path, or SkillSource")
+                .hasMessageContaining("java.lang.Integer");
+    }
+
+    @Test
+    void malformedLocalSkillReturnsSkillError(@TempDir Path tempDir) throws IOException {
+        Path skillDir = tempDir.resolve("broken-skill");
+        Files.createDirectories(skillDir);
+        Files.writeString(skillDir.resolve("SKILL.md"), "missing frontmatter");
+
+        Agent agent =
+                Agent.builder()
+                        .name("malformed_skill_agent")
+                        .model(new TestLlm("malformed-skill-model"))
+                        .skills(skillDir)
+                        .build();
+
+        Map<String, Object> result =
+                findTool(agent, "list_skills")
+                        .runAsync(Map.of(), mock(ToolContext.class))
+                        .blockingGet();
+        assertThat(result)
+                .containsEntry("error_code", "SKILL_FORMAT_ERROR")
+                .containsEntry("error", "Skill file must start with ---");
+    }
+
+    @Test
+    void skillsSandboxModeKeepsSkillsRemoteAndDoesNotMountLocalSkillToolset() {
+        Agent agent =
+                Agent.builder()
+                        .name("remote_skill_agent")
+                        .model(new TestLlm("remote-skill-model"))
+                        .skills("ss-expense-review")
+                        .skillsMode("skills_sandbox")
+                        .tools(new TestTool("execute_skills"))
+                        .build();
+
+        assertThat(canonicalToolNames(agent)).containsExactly("execute_skills");
+        assertThat(agent.metadataSnapshot().explicitToolNames()).containsExactly("execute_skills");
+        assertThat(agent.metadataSnapshot().autoToolNames()).isEmpty();
+    }
+
+    @Test
+    void skillsSandboxModeCanBeConfiguredBeforeSkills() {
+        Agent agent =
+                Agent.builder()
+                        .name("remote_skill_order_agent")
+                        .model(new TestLlm("remote-skill-order-model"))
+                        .skillsMode("skills_sandbox")
+                        .skills("ss-expense-review")
+                        .tools(new TestTool("execute_skills"))
+                        .build();
+
+        assertThat(canonicalToolNames(agent)).containsExactly("execute_skills");
+        assertThat(agent.metadataSnapshot().autoToolNames()).isEmpty();
+    }
+
+    @Test
+    void invalidSkillsSandboxSourcesFailFast(@TempDir Path tempDir) {
+        assertThatThrownBy(
+                        () ->
+                                Agent.builder()
+                                        .name("missing_remote_skill_agent")
+                                        .model(new TestLlm("remote-skill-model"))
+                                        .skillsMode("skills_sandbox")
+                                        .build())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("skills must contain at least one Skill Space ID");
+
+        assertThatThrownBy(
+                        () ->
+                                Agent.builder()
+                                        .name("local_path_remote_skill_agent")
+                                        .model(new TestLlm("remote-skill-model"))
+                                        .skills(tempDir)
+                                        .skillsMode("skills_sandbox")
+                                        .build())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining(
+                        "skills_sandbox skills entries must be Skill Space ID strings");
+
+        assertThatThrownBy(
+                        () ->
+                                Agent.builder()
+                                        .name("bad_remote_skill_agent")
+                                        .model(new TestLlm("remote-skill-model"))
+                                        .skills("not-a-skill-space")
+                                        .skillsMode("skills_sandbox")
+                                        .build())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("skills_sandbox skill space ID must start with ss-");
+
+        assertThatThrownBy(
+                        () ->
+                                Agent.builder()
+                                        .name("no_execute_skills_agent")
+                                        .model(new TestLlm("remote-skill-model"))
+                                        .skills("ss-expense-review")
+                                        .skillsMode("skills_sandbox")
+                                        .build())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("skills_sandbox requires an explicit execute_skills tool.");
+    }
+
+    @Test
+    void unknownSkillsModeStillFailsFast() {
+        assertThatThrownBy(() -> Agent.builder().skillsMode("aio_sandbox"))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("skillsMode=aio_sandbox is not supported");
+    }
+
+    @Test
     void unsupportedPythonOnlyOptionsFailFast() {
         assertThatThrownBy(() -> Agent.builder().name("unsupported_agent").runtime("codex"))
                 .isInstanceOf(UnsupportedOperationException.class)
                 .hasMessageContaining("runtime is not supported");
     }
 
-    private static final class TestLlm extends BaseLlm {
+    private static final class TestLlm extends BaseLlm implements AutoCloseable {
+        private boolean closed;
+
         private TestLlm(String model) {
             super(model);
         }
@@ -458,6 +872,15 @@ class AgentTest {
         @Override
         public BaseLlmConnection connect(LlmRequest llmRequest) {
             throw new UnsupportedOperationException("connect is not used in this test.");
+        }
+
+        @Override
+        public void close() {
+            closed = true;
+        }
+
+        private boolean closed() {
+            return closed;
         }
     }
 
@@ -473,8 +896,59 @@ class AgentTest {
         }
     }
 
+    private static final class CloseableTestTool extends BaseTool implements AutoCloseable {
+        private boolean closed;
+
+        private CloseableTestTool(String name) {
+            super(name, "test tool");
+        }
+
+        @Override
+        public Single<Map<String, Object>> runAsync(
+                Map<String, Object> args, ToolContext toolContext) {
+            return Single.just(Map.of());
+        }
+
+        @Override
+        public void close() {
+            closed = true;
+        }
+
+        private boolean closed() {
+            return closed;
+        }
+    }
+
     private static BaseTool findTool(Agent agent, String name) {
         return agent.canonicalTools().filter(tool -> tool.name().equals(name)).blockingFirst();
+    }
+
+    private static List<String> canonicalToolNames(Agent agent) {
+        return agent.canonicalTools().map(BaseTool::name).toList().blockingGet();
+    }
+
+    private static Path writeSkill(Path skillsRoot, String name, String description, String body)
+            throws IOException {
+        return writeSkill(skillsRoot, name, description, body, "SKILL.md");
+    }
+
+    private static Path writeSkill(
+            Path skillsRoot, String name, String description, String body, String skillFileName)
+            throws IOException {
+        Path skillDir = skillsRoot.resolve(name);
+        Files.createDirectories(skillDir);
+        Files.writeString(
+                skillDir.resolve(skillFileName),
+                """
+                ---
+                name: %s
+                description: %s
+                ---
+
+                %s
+                """
+                        .formatted(name, description, body));
+        return skillDir;
     }
 
     private static String firstKnowledgeContent(BaseTool tool, String query, ToolContext ctx) {

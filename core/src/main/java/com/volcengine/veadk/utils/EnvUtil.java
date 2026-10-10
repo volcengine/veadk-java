@@ -35,9 +35,20 @@ public class EnvUtil {
     private static final String VOLC_SESSIONTOKEN = "VOLC_SESSIONTOKEN";
     private static final String TOOL_CODE_SANDBOX_URL = "TOOL_CODE_SANDBOX_URL";
     private static final String AGENTKIT_TOOL_ID = "AGENTKIT_TOOL_ID";
+    private static final String AGENTKIT_TOOL_ID_SKILLS = "AGENTKIT_TOOL_ID_SKILLS";
     private static final String AGENTKIT_TOOL_SERVICE = "AGENTKIT_TOOL_SERVICE_CODE";
     private static final String AGENTKIT_TOOL_REGION = "AGENTKIT_TOOL_REGION";
     private static final String AGENTKIT_TOOL_HOST = "AGENTKIT_TOOL_HOST";
+    private static final String VOLCENGINE_AGENTKIT_HOST = "VOLCENGINE_AGENTKIT_HOST";
+    private static final String VOLC_AGENTKIT_HOST = "VOLC_AGENTKIT_HOST";
+    private static final String BYTEPLUS_AGENTKIT_HOST = "BYTEPLUS_AGENTKIT_HOST";
+    private static final String SKILLHUB_SERVICE_NAME = "SKILLHUB_SERVICE_NAME";
+    private static final String SKILLHUB_REGION = "SKILLHUB_REGION";
+    private static final String SKILLHUB_HOST = "SKILLHUB_HOST";
+    private static final String SKILLHUB_TOP_SCHEME = "SKILLHUB_TOP_SCHEME";
+    private static final String SKILLHUB_LIST_SKILLS_PAGE_SIZE = "SKILLHUB_LIST_SKILLS_PAGE_SIZE";
+    private static final String SKILL_SPACE_POLICY = "SKILL_SPACE_POLICY";
+    private static final String FINDSKILL_DOWNLOAD_URL = "FINDSKILL_DOWNLOAD_URL";
     private static final String REGION = "REGION";
     private static final String MEM0_API_KEY = "DATABASE_MEM0_API_KEY";
     private static final String MEM0_API_KEY_ID = "DATABASE_MEM0_API_KEY_ID";
@@ -51,6 +62,13 @@ public class EnvUtil {
     private static final String DEFAULT_VIKING_MEMORY_TYPE = "sys_event_v1";
     private static final String DEFAULT_AGENTKIT_SERVICE = "agentkit";
     private static final String DEFAULT_AGENTKIT_REGION = "cn-beijing";
+    private static final String DEFAULT_SKILLHUB_SERVICE = "skillhub";
+    private static final String DEFAULT_SKILLHUB_REGION = "cn-guilin-boe";
+    private static final String DEFAULT_SKILLHUB_HOST = "skills.volces.com";
+    private static final String DEFAULT_SKILLHUB_SCHEME = "https";
+    private static final int DEFAULT_SKILLHUB_LIST_SKILLS_PAGE_SIZE = 100;
+    private static final String DEFAULT_FINDSKILL_DOWNLOAD_URL =
+            "https://skills.volces.com/v1/skills/download";
     private static final String DEFAULT_MODEL_AGENT_PROJECT_NAME = "default";
     private static final String DEFAULT_MEM0_BASE_URL = "https://api.mem0.ai";
 
@@ -60,6 +78,14 @@ public class EnvUtil {
         String toolId = System.getenv(AGENTKIT_TOOL_ID);
         if (StringUtils.isBlank(toolId)) {
             throw getIllegalStateException(AGENTKIT_TOOL_ID);
+        }
+        return toolId;
+    }
+
+    public static String getAgentKitSkillsToolId() {
+        String toolId = System.getenv(AGENTKIT_TOOL_ID_SKILLS);
+        if (StringUtils.isBlank(toolId)) {
+            return getAgentKitToolId();
         }
         return toolId;
     }
@@ -77,9 +103,69 @@ public class EnvUtil {
     public static String getAgentKitHost() {
         String host = System.getenv(AGENTKIT_TOOL_HOST);
         if (StringUtils.isBlank(host)) {
+            if ("byteplus".equalsIgnoreCase(getCloudProvider())) {
+                return getAgentKitService() + "." + getAgentKitRegion() + ".bytepluses.com";
+            }
             return getAgentKitService() + "." + getAgentKitRegion() + ".volces.com";
         }
         return host;
+    }
+
+    public static String getAgentKitManagementHost() {
+        if ("byteplus".equalsIgnoreCase(getCloudProvider())) {
+            String bytePlusHost = System.getenv(BYTEPLUS_AGENTKIT_HOST);
+            if (StringUtils.isNotBlank(bytePlusHost)) {
+                return bytePlusHost;
+            }
+            return getAgentKitService() + "." + getAgentKitRegion() + ".byteplusapi.com";
+        }
+        String host = System.getenv(VOLCENGINE_AGENTKIT_HOST);
+        if (StringUtils.isBlank(host)) {
+            host = System.getenv(VOLC_AGENTKIT_HOST);
+        }
+        return StringUtils.isBlank(host) ? "open.volcengineapi.com" : host;
+    }
+
+    public static String getSkillHubService() {
+        String service = System.getenv(SKILLHUB_SERVICE_NAME);
+        return StringUtils.isBlank(service) ? DEFAULT_SKILLHUB_SERVICE : service;
+    }
+
+    public static String getSkillHubRegion() {
+        String region = System.getenv(SKILLHUB_REGION);
+        return StringUtils.isBlank(region) ? DEFAULT_SKILLHUB_REGION : region;
+    }
+
+    public static String getSkillHubHost() {
+        String host = System.getenv(SKILLHUB_HOST);
+        return StringUtils.isBlank(host) ? DEFAULT_SKILLHUB_HOST : host;
+    }
+
+    public static String getSkillHubScheme() {
+        String scheme = System.getenv(SKILLHUB_TOP_SCHEME);
+        return StringUtils.isBlank(scheme) ? DEFAULT_SKILLHUB_SCHEME : scheme.toLowerCase();
+    }
+
+    public static int getSkillHubListSkillsPageSize() {
+        String pageSize = System.getenv(SKILLHUB_LIST_SKILLS_PAGE_SIZE);
+        if (StringUtils.isBlank(pageSize)) {
+            return DEFAULT_SKILLHUB_LIST_SKILLS_PAGE_SIZE;
+        }
+        try {
+            int parsed = Integer.parseInt(pageSize);
+            return parsed > 0 ? parsed : DEFAULT_SKILLHUB_LIST_SKILLS_PAGE_SIZE;
+        } catch (NumberFormatException e) {
+            return DEFAULT_SKILLHUB_LIST_SKILLS_PAGE_SIZE;
+        }
+    }
+
+    public static String getSkillSpacePolicy() {
+        return System.getenv(SKILL_SPACE_POLICY);
+    }
+
+    public static String getFindSkillDownloadUrl() {
+        String url = System.getenv(FINDSKILL_DOWNLOAD_URL);
+        return StringUtils.isBlank(url) ? DEFAULT_FINDSKILL_DOWNLOAD_URL : url;
     }
 
     public static String getAgentApiKey() {
@@ -88,6 +174,14 @@ public class EnvUtil {
             throw getIllegalStateException(MODEL_AGENT_API_KEY);
         }
         return apiKey;
+    }
+
+    public static String getOptionalAgentApiKey() {
+        return System.getenv(MODEL_AGENT_API_KEY);
+    }
+
+    public static String getAgentApiKeyName() {
+        return System.getenv(MODEL_AGENT_API_KEY_NAME);
     }
 
     public static String getModelAgentApiKeyId() {

@@ -111,6 +111,115 @@ import com.volcengine.veadk.Runner;
 String answer = new Runner(agent).run("你好");
 ```
 
+#### 本地 Skills
+
+本地 skills 通过 ADK Java 的 `SkillToolset` 支持。配置
+`Agent.builder().skills(...)` 后，VeADK Java 会自动注入一个 `SkillToolset`；如果
+用户已经通过 `tools(...)` 显式传入 `SkillToolset`，则不会重复注入。
+
+一个 skill 是包含必需 `SKILL.md` 文件的目录：
+
+```text
+skills/
+  expense-policy-reviewer/
+    SKILL.md
+    references/
+    assets/
+    scripts/
+```
+
+`SKILL.md` 必须以 frontmatter 开头，且其中的 `name` 需要与 skill 目录名一致：
+
+```markdown
+---
+name: expense-policy-reviewer
+description: 根据公司制度审核员工报销申请。
+---
+
+根据报销制度进行判断，并输出简洁的预审结论。
+```
+
+可以传入 skills 根目录、单个 skill 目录、`SKILL.md`/`skill.md` 文件，或显式的 ADK
+`SkillSource`：
+
+```java
+import java.nio.file.Path;
+
+Agent agent = Agent.builder()
+    .name("expense-review-agent")
+    .instruction("回答制度问题前先使用本地 skills。")
+    .modelName("doubao-seed-2-1-pro-260628")
+    .skills(Path.of("example/src/main/resources/skills"))
+    .skillsMode("local")
+    .build();
+```
+
+`skills(...)` 支持以下条目：
+
+- `Path` 或 `String`：本地文件系统路径。包含 `SKILL.md` 或 `skill.md` 的目录会被
+  视为单个 skill；否则该目录会被视为包含多个 skill 子目录的 skills root。
+- `SkillSource`：任意 ADK Java skill source，例如 `LocalSkillSource` 或
+  `ClassPathSkillSource`。
+
+多个 skill 条目会按传入顺序合并。如果多个条目暴露同名 skill，后传入的条目在
+`list_skills` 和 `load_skill` 中都会覆盖先传入的条目。
+
+如果 skill 打包在应用 resources/classpath 中，可以显式传入 ADK 的 classpath source：
+
+```java
+import com.google.adk.skills.ClassPathSkillSource;
+
+Agent agent = Agent.builder()
+    .name("classpath-skill-agent")
+    .skills(new ClassPathSkillSource("skills"))
+    .skillsMode("local")
+    .build();
+```
+
+远端 skill source 的元信息和 skill 包可以通过 `VeSkillSource` 暴露给 ADK Java
+`SkillToolset`。source ID 可以是 AgentKit Skill Space（`ss-...`），也可以是
+SkillHub space（`sp-...`）：
+
+```java
+import com.google.adk.tools.skills.SkillToolset;
+import com.volcengine.veadk.skills.VeSkillSource;
+
+Agent agent = Agent.builder()
+    .name("remote-skill-agent")
+    .tools(new SkillToolset(new VeSkillSource(System.getenv("SKILL_SOURCE_ID"))))
+    .build();
+```
+
+如果要委托 Skills Sandbox 执行，传入 AgentKit Skill Space ID，并只暴露 `execute_skills`
+工具：
+
+```java
+import com.volcengine.veadk.tools.builtin.sandbox.ExecuteSkillsTool;
+
+Agent agent = Agent.builder()
+    .name("remote-sandbox-agent")
+    .skills(System.getenv("SKILL_SPACE_ID"))
+    .skillsMode("skills_sandbox")
+    .tools(new ExecuteSkillsTool())
+    .build();
+```
+
+Sandbox 工具调用失败时会返回结构化错误。Agent 可以读取 `error.code`、
+`error.message`、`error.suggestion` 和 `error.retryable` 来解释失败原因或判断是否重试：
+
+```json
+{
+  "error": {
+    "code": "SKILLS_SANDBOX_A2A_FAILED",
+    "message": "message/send failed: invalid skill request",
+    "suggestion": "Check the Skills Sandbox A2A error message and retry only if the error is transient.",
+    "retryable": false
+  }
+}
+```
+
+#### 短期记忆
+
 短期记忆表示会话级上下文。把它配置在 Agent 上，并在追问时复用同一个
 `userId` 和 `sessionId`：
 
@@ -140,19 +249,34 @@ metadata 输出包含：
   `autoSaveSession`。
 - `tools`：工具名及来源。`explicit` 表示用户通过
   `Agent.builder().tools(...)` 传入；`auto` 表示 builder 根据 VeADK 组件自动注入，
-  例如 `loadKnowledgebase` 或 `loadMemory`；`adk` 表示从普通 ADK `LlmAgent`
-  降级提取。
+  例如 `loadKnowledgebase`、`loadMemory` 或 `SkillToolset`；`adk` 表示从普通
+  ADK `LlmAgent` 降级提取。
 - `subAgents`：每个子 Agent 使用同样的 metadata 结构。
 - `components`：稳定组件槽位，包括 `knowledgebase`、`longTermMemory`、
   `shortTermMemory`、`tracer`、`toolset`、`plugin`。
 - `searchSources`：`web`、`knowledge`、`memory`，每项包含 `enabled` 状态和对应工具名。
   规范工具名是 `web_search`、`loadKnowledgebase`、`loadMemory`。
 
-### 必需环境变量
-未显式传入 API key 且需要自动创建模型适配器时，示例在运行前需要配置以下环境变量
-（缺失时会抛出明确错误）：
+### 模型凭证
+自动创建模型适配器或调用 `ArkLlm` 的示例需要模型凭证，解析顺序如下：
 
-  - `MODEL_AGENT_API_KEY`：自动创建模型适配器时使用的默认 API Key
+- `modelApiKey(...)`：builder 上显式传入的 API key。
+- `MODEL_AGENT_API_KEY`：环境变量中的模型原始 API key。
+- `MODEL_AGENT_API_KEY_ID`：Ark API key ID。配置后，VeADK 会通过 Ark OpenAPI
+  解析出原始 key。
+- `MODEL_AGENT_API_KEY_NAME`：Ark API key 名称。配置后，VeADK 会通过 Ark OpenAPI
+  解析出原始 key。
+- 火山 AK/SK fallback：未配置 key 值或 key 名称时，VeADK 会通过 Ark OpenAPI 解析账号
+  下的第一个 Ark API key。
+
+Ark OpenAPI fallback 需要：
+
+- `VOLCENGINE_ACCESS_KEY`
+- `VOLCENGINE_SECRET_KEY`
+- 可选：`VOLCENGINE_SESSION_TOKEN` 或 `VOLC_SESSIONTOKEN`
+- 可选：`REGION`，默认 `cn-beijing`
+- 可选：`MODEL_AGENT_PROJECT_NAME`，默认 `default`
+- 可选：`CLOUD_PROVIDER=byteplus`，用于 BytePlus 控制面路由
  
 示例设置（macOS / Linux）：
 
@@ -173,6 +297,14 @@ export MODEL_AGENT_API_KEY="<your-ark-api-key>"
 ```bash
 export MODEL_AGENT_API_KEY="<your-ark-api-key>"
 ./mvnw -pl example -am -q compile exec:java -Dexec.mainClass=com.volcengine.veadk.example.AgentExample
+```
+
+运行本地 skills 示例。它会从 `example/src/main/resources/skills` 加载报销制度
+skill，并对一笔真实风格的报销申请做预审：
+
+```bash
+export MODEL_AGENT_API_KEY="<your-ark-api-key>"
+./mvnw -pl example -am -q compile exec:java -Dexec.mainClass=com.volcengine.veadk.example.LocalSkillsExpenseReviewAgent
 ```
 
 ### 运行示例（CLI）
@@ -228,18 +360,18 @@ export MODEL_AGENT_API_KEY="<your-ark-api-key>"
 ## 相关项目
 - Python 版本与文档参考：[veadk-python](https://github.com/volcengine/veadk-python)。
 
-## 当前范围
+## 当前功能范围
 
-Java Agent 当前先提供小而稳定的类型化契约。它在用户入口上对齐 Python 版本
+Java Agent 当前提供小而稳定的类型化契约。它在用户入口上对齐 Python 版本
 （`Agent.builder()`、模型、工具、sub-agents、memory/knowledgebase metadata），但
 metadata 来自 builder 阶段记录的显式状态和 ADK public getter，不通过运行时反射扫
 对象内部字段。
 
-PR0 暂不支持以下 Python 侧能力：
+Java Agent 当前不支持以下 Python 侧能力：
 
 - `runtime=codex/piagent`
 - `enableResponses`
-- legacy `skills` / `skillsMode`
+- `aio_sandbox`
 - `enableA2ui`
 - `enableTunnel`
 - YAML 或动态工具发现

@@ -22,9 +22,12 @@ import com.google.adk.agents.LlmAgent;
 import com.google.adk.codeexecutors.BaseCodeExecutor;
 import com.google.adk.memory.BaseMemoryService;
 import com.google.adk.models.BaseLlm;
+import com.google.adk.skills.LocalSkillSource;
+import com.google.adk.skills.SkillSource;
 import com.google.adk.tools.BaseTool;
 import com.google.adk.tools.BaseToolset;
 import com.google.adk.tools.LoadMemoryTool;
+import com.google.adk.tools.skills.SkillToolset;
 import com.google.common.collect.ImmutableList;
 import com.google.genai.types.GenerateContentConfig;
 import com.google.genai.types.Schema;
@@ -36,11 +39,17 @@ import com.volcengine.veadk.model.ArkLlmConfig;
 import com.volcengine.veadk.model.ModelProvider;
 import com.volcengine.veadk.model.OpenAiCompatibleLlm;
 import com.volcengine.veadk.model.OpenAiCompatibleLlmConfig;
-import com.volcengine.veadk.tools.knowledgebase.LoadKnowledgebaseTool;
+import com.volcengine.veadk.skills.CompositeSkillSource;
+import com.volcengine.veadk.skills.SingleSkillDirectorySource;
+import com.volcengine.veadk.tools.builtin.knowledgebase.LoadKnowledgebaseTool;
+import io.reactivex.rxjava3.core.Completable;
 import io.reactivex.rxjava3.core.Maybe;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.Executor;
@@ -54,6 +63,8 @@ public final class Agent extends LlmAgent {
     public static final String DEFAULT_MODEL_NAME = "doubao-seed-2-1-pro-260628";
     public static final String AUTO_TOOL_METADATA_KEY = "veadk.autoTool";
     public static final String AUTO_TOOL_SOURCE_METADATA_KEY = "veadk.autoToolSource";
+    private static final String SKILLS_MODE_LOCAL = "local";
+    private static final String SKILLS_MODE_SKILLS_SANDBOX = "skills_sandbox";
 
     private final BaseMemoryService longTermMemoryService;
     private final ShortTermMemory shortTermMemory;
@@ -61,6 +72,7 @@ public final class Agent extends LlmAgent {
     private final boolean autoSaveSession;
     private final String veadkModelName;
     private final AgentMetadataSnapshot metadataSnapshot;
+    private final List<AutoCloseable> closeableTools;
 
     private Agent(Builder builder) {
         super(builder);
@@ -70,6 +82,11 @@ public final class Agent extends LlmAgent {
         this.autoSaveSession = builder.autoSaveSession;
         this.veadkModelName = Objects.requireNonNullElse(builder.veadkModelName, "");
         this.metadataSnapshot = builder.metadataSnapshot(name(), description());
+        this.closeableTools =
+                builder.explicitTools.stream()
+                        .filter(AutoCloseable.class::isInstance)
+                        .map(AutoCloseable.class::cast)
+                        .toList();
     }
 
     public static Builder builder() {
@@ -100,6 +117,33 @@ public final class Agent extends LlmAgent {
         return metadataSnapshot;
     }
 
+    @Override
+    public Completable close() {
+        Completable closeModel =
+                Completable.fromAction(
+                        () ->
+                                model().flatMap(com.google.adk.models.Model::model)
+                                        .filter(AutoCloseable.class::isInstance)
+                                        .map(AutoCloseable.class::cast)
+                                        .ifPresent(
+                                                closeable ->
+                                                        closeAutoCloseable(closeable, "model")));
+        Completable closeTools =
+                Completable.fromAction(
+                        () ->
+                                closeableTools.forEach(
+                                        closeable -> closeAutoCloseable(closeable, "tool")));
+        return Completable.mergeArray(super.close(), closeModel, closeTools);
+    }
+
+    private static void closeAutoCloseable(AutoCloseable closeable, String resourceType) {
+        try {
+            closeable.close();
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to close " + resourceType, e);
+        }
+    }
+
     /** Builder for {@link Agent}. */
     public static final class Builder extends LlmAgent.Builder {
 
@@ -119,6 +163,8 @@ public final class Agent extends LlmAgent {
         private SaveSessionToMemoryCallback.AutoSavePolicy autoSaveMemoryPolicy =
                 SaveSessionToMemoryCallback.AutoSavePolicy.fromEnv();
         private List<Object> explicitTools = List.of();
+        private List<Object> localSkills = List.of();
+        private String skillsMode = "local";
         private List<Callbacks.AfterAgentCallback> explicitAfterAgentCallbacks = List.of();
 
         public Builder() {
@@ -199,11 +245,23 @@ public final class Agent extends LlmAgent {
         }
 
         public Builder skills(List<?> skills) {
-            throw unsupportedPythonOption("skills");
+            this.localSkills = List.copyOf(Objects.requireNonNull(skills, "skills must be set."));
+            return this;
+        }
+
+        public Builder skills(Object... skills) {
+            return skills(Arrays.asList(Objects.requireNonNull(skills, "skills must be set.")));
         }
 
         public Builder skillsMode(String skillsMode) {
-            throw unsupportedPythonOption("skillsMode");
+            String resolvedMode =
+                    requireText(skillsMode, "skillsMode must be set.").toLowerCase(Locale.ROOT);
+            if (!SKILLS_MODE_LOCAL.equals(resolvedMode)
+                    && !SKILLS_MODE_SKILLS_SANDBOX.equals(resolvedMode)) {
+                throw unsupportedPythonOption("skillsMode=" + skillsMode);
+            }
+            this.skillsMode = resolvedMode;
+            return this;
         }
 
         public Builder enableA2ui(boolean enabled) {
@@ -582,6 +640,28 @@ public final class Agent extends LlmAgent {
                 generatedAutoToolNames.add(memoryTool.name());
             }
 
+            if (!localSkills.isEmpty()) {
+                if (SKILLS_MODE_LOCAL.equals(skillsMode)) {
+                    if (!containsToolset(tools, SkillToolset.class)) {
+                        BaseToolset skillToolset = new SkillToolset(createSkillSource(localSkills));
+                        tools.add(skillToolset);
+                        generatedAutoToolNames.add(toolName(skillToolset));
+                    }
+                } else if (SKILLS_MODE_SKILLS_SANDBOX.equals(skillsMode)) {
+                    validateSkillsSandboxSources(localSkills);
+                    if (!containsToolNamed(tools, "execute_skills")) {
+                        throw new IllegalArgumentException(
+                                "skills_sandbox requires an explicit execute_skills tool.");
+                    }
+                } else {
+                    throw unsupportedPythonOption("skillsMode=" + skillsMode);
+                }
+            } else if (SKILLS_MODE_SKILLS_SANDBOX.equals(skillsMode)) {
+                throw new IllegalArgumentException(
+                        "skills must contain at least one Skill Space ID when skillsMode is"
+                                + " skills_sandbox.");
+            }
+
             this.autoToolNames = List.copyOf(generatedAutoToolNames);
             super.tools(tools);
 
@@ -604,6 +684,72 @@ public final class Agent extends LlmAgent {
                     .filter(BaseTool.class::isInstance)
                     .map(BaseTool.class::cast)
                     .anyMatch(tool -> tool.name().equals(name));
+        }
+
+        private static boolean containsToolset(
+                List<?> tools, Class<? extends BaseToolset> toolsetType) {
+            return tools.stream().anyMatch(toolsetType::isInstance);
+        }
+
+        private static SkillSource createSkillSource(List<?> skills) {
+            List<SkillSource> sources = skills.stream().map(Builder::createSkillSource).toList();
+            return sources.size() == 1 ? sources.get(0) : new CompositeSkillSource(sources);
+        }
+
+        private static SkillSource createSkillSource(Object skill) {
+            Objects.requireNonNull(skill, "skill must not be null.");
+            if (skill instanceof SkillSource skillSource) {
+                return skillSource;
+            }
+            if (skill instanceof Path path) {
+                return createLocalSkillSource(path);
+            }
+            if (skill instanceof String path) {
+                return createLocalSkillSource(
+                        Path.of(requireText(path, "skill path must be set.")));
+            }
+            throw new IllegalArgumentException(
+                    "skills entries must be String, Path, or SkillSource, but got "
+                            + skill.getClass().getName());
+        }
+
+        private static SkillSource createLocalSkillSource(Path path) {
+            Path resolvedPath =
+                    Objects.requireNonNull(path, "skill path must be set.")
+                            .toAbsolutePath()
+                            .normalize();
+            if (Files.isRegularFile(resolvedPath)) {
+                String fileName = resolvedPath.getFileName().toString();
+                if (!"SKILL.md".equals(fileName) && !"skill.md".equals(fileName)) {
+                    throw new IllegalArgumentException(
+                            "skill file path must point to SKILL.md or skill.md: " + resolvedPath);
+                }
+                return new SingleSkillDirectorySource(resolvedPath.getParent());
+            }
+            if (!Files.isDirectory(resolvedPath)) {
+                throw new IllegalArgumentException("skill path does not exist: " + resolvedPath);
+            }
+            if (Files.isRegularFile(resolvedPath.resolve("SKILL.md"))
+                    || Files.isRegularFile(resolvedPath.resolve("skill.md"))) {
+                return new SingleSkillDirectorySource(resolvedPath);
+            }
+            return new LocalSkillSource(resolvedPath);
+        }
+
+        private static void validateSkillsSandboxSources(List<?> skills) {
+            for (Object skill : skills) {
+                if (!(skill instanceof String skillSpaceId)) {
+                    throw new IllegalArgumentException(
+                            "skills_sandbox skills entries must be Skill Space ID strings.");
+                }
+                String resolvedSkillSpaceId =
+                        requireText(skillSpaceId, "skill space ID must be set.");
+                if (!resolvedSkillSpaceId.startsWith("ss-")) {
+                    throw new IllegalArgumentException(
+                            "skills_sandbox skill space ID must start with ss-: "
+                                    + resolvedSkillSpaceId);
+                }
+            }
         }
 
         private static boolean containsSaveSessionCallback(
@@ -680,8 +826,9 @@ public final class Agent extends LlmAgent {
         private static UnsupportedOperationException unsupportedPythonOption(String optionName) {
             return new UnsupportedOperationException(
                     optionName
-                            + " is not supported in Agent PR-0. The Java Agent keeps this"
-                            + " Python-side option fail-fast until a typed Java design is added.");
+                            + " is not supported by the current Java Agent. The Java Agent keeps"
+                            + " this Python-side option fail-fast until a typed Java design is"
+                            + " added.");
         }
 
         private record ResolvedModel(ModelProvider provider, String modelName) {}

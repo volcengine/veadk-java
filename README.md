@@ -116,6 +116,121 @@ import com.volcengine.veadk.Runner;
 String answer = new Runner(agent).run("Hello");
 ```
 
+#### Local Skills
+
+Local skills are supported through ADK Java's `SkillToolset`. When
+`Agent.builder().skills(...)` is configured, VeADK Java automatically injects
+one `SkillToolset` unless the user already passed an explicit `SkillToolset`
+through `tools(...)`.
+
+A skill is a directory containing a required `SKILL.md` file:
+
+```text
+skills/
+  expense-policy-reviewer/
+    SKILL.md
+    references/
+    assets/
+    scripts/
+```
+
+The `SKILL.md` file must start with frontmatter whose `name` matches the skill
+directory name:
+
+```markdown
+---
+name: expense-policy-reviewer
+description: Review employee reimbursement requests against the company policy.
+---
+
+Follow the reimbursement policy and produce a concise review.
+```
+
+Pass a skills root directory, a single skill directory, a `SKILL.md`/`skill.md`
+file, or an explicit ADK `SkillSource`:
+
+```java
+import java.nio.file.Path;
+
+Agent agent = Agent.builder()
+    .name("expense-review-agent")
+    .instruction("Use local skills before answering policy questions.")
+    .modelName("doubao-seed-2-1-pro-260628")
+    .skills(Path.of("example/src/main/resources/skills"))
+    .skillsMode("local")
+    .build();
+```
+
+Supported entries for `skills(...)` are:
+
+- `Path` or `String`: local filesystem path. A directory with `SKILL.md` or
+  `skill.md` is treated as one skill; otherwise the directory is treated as a
+  skills root containing skill subdirectories.
+- `SkillSource`: any ADK Java skill source, including `LocalSkillSource` or
+  `ClassPathSkillSource`.
+
+Multiple skill entries are merged in the order provided. If more than one entry
+exposes the same skill name, the later entry takes precedence for both
+`list_skills` and `load_skill`.
+
+For skills packaged in application resources, pass ADK's classpath source
+explicitly:
+
+```java
+import com.google.adk.skills.ClassPathSkillSource;
+
+Agent agent = Agent.builder()
+    .name("classpath-skill-agent")
+    .skills(new ClassPathSkillSource("skills"))
+    .skillsMode("local")
+    .build();
+```
+
+Remote skill source metadata and skill packages can be exposed through ADK
+Java's `SkillToolset` with `VeSkillSource`. The source ID can be an AgentKit
+Skill Space (`ss-...`) or SkillHub space (`sp-...`):
+
+```java
+import com.google.adk.tools.skills.SkillToolset;
+import com.volcengine.veadk.skills.VeSkillSource;
+
+Agent agent = Agent.builder()
+    .name("remote-skill-agent")
+    .tools(new SkillToolset(new VeSkillSource(System.getenv("SKILL_SOURCE_ID"))))
+    .build();
+```
+
+For Skills Sandbox delegation, configure an AgentKit Skill Space ID and expose
+only the `execute_skills` tool:
+
+```java
+import com.volcengine.veadk.tools.builtin.sandbox.ExecuteSkillsTool;
+
+Agent agent = Agent.builder()
+    .name("remote-sandbox-agent")
+    .skills(System.getenv("SKILL_SPACE_ID"))
+    .skillsMode("skills_sandbox")
+    .tools(new ExecuteSkillsTool())
+    .build();
+```
+
+Sandbox tools return structured errors when a tool call fails. Agents can use
+`error.code`, `error.message`, `error.suggestion`, and `error.retryable` to
+explain the failure or decide whether to retry:
+
+```json
+{
+  "error": {
+    "code": "SKILLS_SANDBOX_A2A_FAILED",
+    "message": "message/send failed: invalid skill request",
+    "suggestion": "Check the Skills Sandbox A2A error message and retry only if the error is transient.",
+    "retryable": false
+  }
+}
+```
+
+#### Short-Term Memory
+
 Short-term memory is session-scoped context. Configure it on the agent, then
 reuse the same `userId` and `sessionId` when running follow-up turns:
 
@@ -145,8 +260,8 @@ The extracted metadata includes:
   and `autoSaveSession`.
 - `tools`: tool names with their source. `explicit` means the user passed the
   tool through `Agent.builder().tools(...)`; `auto` means the builder injected it
-  from a configured VeADK component, such as `loadKnowledgebase` or `loadMemory`;
-  `adk` is used when extracting from a plain ADK `LlmAgent`.
+  from a configured VeADK component, such as `loadKnowledgebase`, `loadMemory`,
+  or `SkillToolset`; `adk` is used when extracting from a plain ADK `LlmAgent`.
 - `subAgents`: the same metadata shape for each child agent.
 - `components`: stable component slots for `knowledgebase`, `longTermMemory`,
   `shortTermMemory`, `tracer`, `toolset`, and `plugin`.
@@ -154,12 +269,27 @@ The extracted metadata includes:
   flag and the associated tool name when applicable. The canonical tool names
   are `web_search`, `loadKnowledgebase`, and `loadMemory`.
 
-### Required Environment Variables
-Examples that auto-create a model without an explicit API key require the
-following environment variable before running (an explicit error is thrown if
-missing):
+### Model Credentials
+Examples that auto-create a model adapter or call `ArkLlm` need model credentials. The
+resolution order is:
 
-  - `MODEL_AGENT_API_KEY`: default API key for auto-created model adapters
+- `modelApiKey(...)`: explicit API key on the builder.
+- `MODEL_AGENT_API_KEY`: raw model API key from the environment.
+- `MODEL_AGENT_API_KEY_ID`: Ark API key ID. When set, VeADK resolves the raw key
+  through Ark OpenAPI.
+- `MODEL_AGENT_API_KEY_NAME`: Ark API key name. When set, VeADK resolves the raw
+  key through Ark OpenAPI.
+- Volcengine AK/SK fallback: when no key value or key name is configured, VeADK
+  resolves the first Ark API key in the account through Ark OpenAPI.
+
+Ark OpenAPI fallback requires:
+
+- `VOLCENGINE_ACCESS_KEY`
+- `VOLCENGINE_SECRET_KEY`
+- Optional: `VOLCENGINE_SESSION_TOKEN` or `VOLC_SESSIONTOKEN`
+- Optional: `REGION`, defaulting to `cn-beijing`
+- Optional: `MODEL_AGENT_PROJECT_NAME`, defaulting to `default`
+- Optional: `CLOUD_PROVIDER=byteplus` for BytePlus control-plane routing
  
 Example setup (macOS / Linux):
 
@@ -174,21 +304,37 @@ In the repository root, run: `./mvnw clean -DskipTests package`
 
 After building, the compiled artifacts needed by the examples will be generated in `example/target`.
 
+Example sources are grouped by feature module:
+
+- `example.basic`: minimal Agent, reusable Ark agent, and CLI runner.
+- `example.skills`: local skills, remote Skills Sandbox, and non-blocking remote skill tasks.
+- `example.knowledgebase`: Viking and OpenSearch knowledgebase examples.
+- `example.memory`: Mem0 memory example.
+- `example.web`: ADK Web startup example.
+
 Run the Agent example. It builds an Ark-backed `Agent`, registers a Java
 function tool, and calls `Runner.run(...)` directly:
 
 ```bash
 export MODEL_AGENT_API_KEY="<your-ark-api-key>"
-./mvnw -pl example -am -q compile exec:java -Dexec.mainClass=com.volcengine.veadk.example.AgentExample
+./mvnw -pl example -am -q compile exec:java -Dexec.mainClass=com.volcengine.veadk.example.basic.AgentExample
+```
+
+Run the local skills example. It loads a reimbursement policy skill from
+`example/src/main/resources/skills` and pre-reviews a realistic expense claim:
+
+```bash
+export MODEL_AGENT_API_KEY="<your-ark-api-key>"
+./mvnw -pl example -am -q compile exec:java -Dexec.mainClass=com.volcengine.veadk.example.skills.LocalSkillsExpenseReviewAgent
 ```
 
 ### Run the Example (CLI)
-Entry class: `com.volcengine.veadk.example.AgentCliRunner`.
+Entry class: `com.volcengine.veadk.example.basic.AgentCliRunner`.
 
 Run it (without modifying the POM, directly via Maven Exec plugin coordinates):
 
 ```bash
-./mvnw -pl example -am -q compile exec:java -Dexec.mainClass=com.volcengine.veadk.example.AgentCliRunner
+./mvnw -pl example -am -q compile exec:java -Dexec.mainClass=com.volcengine.veadk.example.basic.AgentCliRunner
 ```
 
 Interaction notes:
@@ -200,8 +346,7 @@ Start command:
 
 ```bash
 ./mvnw -pl example -am -q compile exec:java \
-    -Dexec.mainClass="com.google.adk.web.AdkWebServer" \
-    -Dexec.args="--adk.agents.source-dir=example/target --server.port=8000"  
+    -Dexec.mainClass=com.volcengine.veadk.example.web.AdkWeb
 ```
 
 - Access URL: `http://localhost:8000`
@@ -229,25 +374,25 @@ Run the Mem0 memory example:
 
 ```bash
 ./mvnw -q install -DskipTests
-./mvnw -pl example -am -q compile exec:java -Dexec.mainClass=com.volcengine.veadk.example.Mem0MemoryAgent
+./mvnw -pl example -am -q compile exec:java -Dexec.mainClass=com.volcengine.veadk.example.memory.Mem0MemoryAgent
 ```
 
 ## Related Projects
 - Python version and documentation: [veadk-python](https://github.com/volcengine/veadk-python).
 
-## Current Scope
+## Supported Feature Scope
 
-The Java Agent intentionally starts with a small, typed contract. It matches the
-Python package at the user-entry level (`Agent.builder()`, model, tools,
-sub-agents, memory/knowledgebase metadata), while Java records metadata from
-explicit builder state and ADK public accessors instead of dynamically scanning
-object internals.
+The Java Agent provides a small, typed contract. It matches the Python package
+at the user-entry level (`Agent.builder()`, model, tools, sub-agents,
+memory/knowledgebase metadata), while Java records metadata from explicit
+builder state and ADK public accessors instead of dynamically scanning object
+internals.
 
-PR0 does not yet support these Python-side capabilities:
+The Java Agent does not currently support these Python-side capabilities:
 
 - `runtime=codex/piagent`
 - `enableResponses`
-- legacy `skills` / `skillsMode`
+- `aio_sandbox`
 - `enableA2ui`
 - `enableTunnel`
 - YAML or dynamic tool discovery

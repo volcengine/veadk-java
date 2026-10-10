@@ -42,6 +42,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
+import okhttp3.Dispatcher;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -50,7 +51,9 @@ import org.junitpioneer.jupiter.ClearEnvironmentVariable;
 import org.junitpioneer.jupiter.SetEnvironmentVariable;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
+import org.mockito.MockedConstruction;
 import org.mockito.MockedStatic;
+import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 @ExtendWith(MockitoExtension.class)
@@ -94,6 +97,33 @@ class ArkLlmTest {
     }
 
     @Test
+    void closeShutsDownArkHttpResources() throws Exception {
+        arkLlm.close();
+
+        org.mockito.Mockito.verify(arkService).shutdownExecutor();
+        Dispatcher dispatcher = (Dispatcher) getField(arkLlm, "dispatcher");
+        assertTrue(dispatcher.executorService().isShutdown());
+    }
+
+    @Test
+    void missingEnvApiKeyFallsBackToArkOpenApiResolver() {
+        try (MockedStatic<EnvUtil> env = mockStatic(EnvUtil.class);
+                MockedConstruction<ArkApiKeyAuthClient> resolver =
+                        Mockito.mockConstruction(
+                                ArkApiKeyAuthClient.class,
+                                (mock, context) ->
+                                        when(mock.resolve()).thenReturn("resolved-key"))) {
+            env.when(EnvUtil::getAgentApiKey)
+                    .thenThrow(new IllegalStateException("MODEL_AGENT_API_KEY missing"));
+
+            ArkLlmConfig config = ArkLlmConfig.builder().modelName("fallback-model").build();
+
+            assertEquals("resolved-key", config.getApiKey());
+            assertEquals(1, resolver.constructed().size());
+        }
+    }
+
+    @Test
     @ClearEnvironmentVariable(key = "MODEL_AGENT_API_KEY")
     @ClearEnvironmentVariable(key = "MODEL_AGENT_API_KEY_ID")
     @ClearEnvironmentVariable(key = "MODEL_AGENT_API_KEY_NAME")
@@ -105,7 +135,7 @@ class ArkLlmTest {
                         IllegalStateException.class,
                         () -> ArkLlmConfig.builder().modelName("missing-key-model").build());
 
-        assertTrue(exception.getMessage().contains("MODEL_AGENT_API_KEY"));
+        assertTrue(exception.getMessage().contains("VOLCENGINE_ACCESS_KEY"));
     }
 
     @Test
@@ -241,6 +271,13 @@ class ArkLlmTest {
         Field field = ArkLlm.class.getDeclaredField("arkService");
         field.setAccessible(true);
         field.set(llm, arkService);
+    }
+
+    private Object getField(Object target, String name)
+            throws NoSuchFieldException, IllegalAccessException {
+        Field field = target.getClass().getDeclaredField(name);
+        field.setAccessible(true);
+        return field.get(target);
     }
 
     private ChatCompletionResult createMockToolCallResult(List<ChatToolCall> toolCalls) {
