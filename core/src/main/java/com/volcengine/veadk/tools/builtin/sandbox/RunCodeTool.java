@@ -77,21 +77,34 @@ public class RunCodeTool extends BaseTool {
 
     @Override
     public Single<Map<String, Object>> runAsync(Map<String, Object> args, ToolContext context) {
-        String code = (String) args.get("code");
-        String language = (String) args.get("language");
+        return Single.fromCallable(() -> execute(args, context));
+    }
 
-        int timeout = 30; // Default
-        if (args.containsKey("timeout")) {
-            Object t = args.get("timeout");
-            if (t instanceof Number) {
-                timeout = ((Number) t).intValue();
-            } else if (t instanceof String) {
-                timeout = Integer.parseInt((String) t);
-            }
+    private Map<String, Object> execute(Map<String, Object> args, ToolContext context) {
+        try {
+            String code = requireText((String) args.get("code"), "code");
+            String language = requireText((String) args.get("language"), "language");
+            int timeout = timeoutSeconds(args.get("timeout"));
+            return execute(code, language, timeout, context);
+        } catch (Exception e) {
+            logger.error("Failed to execute code sandbox request: {}", e.getMessage());
+            logger.debug("Failed to execute code sandbox request", e);
+            return ToolErrorResponse.codeSandbox(e);
         }
-        int finalTimeout = timeout;
+    }
 
-        return Single.fromCallable(() -> execute(code, language, finalTimeout, context));
+    private static int timeoutSeconds(Object timeout) {
+        int defaultTimeout = 30;
+        if (timeout instanceof Number number) {
+            return number.intValue();
+        }
+        if (timeout instanceof String text) {
+            return Integer.parseInt(text);
+        }
+        if (timeout == null) {
+            return defaultTimeout;
+        }
+        throw new IllegalArgumentException("timeout must be an integer");
     }
 
     private Map<String, Object> execute(
@@ -100,13 +113,15 @@ public class RunCodeTool extends BaseTool {
         String sessionId = context.sessionId();
         logger.debug("Running code: lang={}, sessionId={}", language, sessionId);
 
-        try {
-            String toolId = EnvUtil.getAgentKitToolId();
-            String output = agentKitWrapper.runCode(toolId, sessionId, code, language, timeout);
-            return ImmutableMap.of("result", output);
-        } catch (Exception e) {
-            logger.error("Failed to execute code sandbox request", e);
-            return ImmutableMap.of("error", e.getMessage());
+        String toolId = EnvUtil.getAgentKitToolId();
+        String output = agentKitWrapper.runCode(toolId, sessionId, code, language, timeout);
+        return ImmutableMap.of("result", output);
+    }
+
+    private static String requireText(String value, String name) {
+        if (value == null || value.isBlank()) {
+            throw new IllegalArgumentException(name + " must be set.");
         }
+        return value;
     }
 }

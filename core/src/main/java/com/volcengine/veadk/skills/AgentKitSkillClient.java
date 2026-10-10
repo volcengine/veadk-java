@@ -148,8 +148,12 @@ public class AgentKitSkillClient {
                 httpClient.send(request, HttpResponse.BodyHandlers.ofByteArray());
         if (response.statusCode() < 200 || response.statusCode() >= 300) {
             throw new IOException(
-                    "Failed to download remote skill archive, HTTP status "
-                            + response.statusCode());
+                    "Failed to download remote skill archive for "
+                            + SkillErrorMessages.describe(skill)
+                            + ", HTTP status "
+                            + response.statusCode()
+                            + responseSnippet(response.body())
+                            + ". Check TOS download permissions and remote skill metadata.");
         }
         Files.write(targetZip, response.body());
     }
@@ -184,9 +188,10 @@ public class AgentKitSkillClient {
                         .orElseThrow(
                                 () ->
                                         new IOException(
-                                                "Skill Hub skill '"
-                                                        + skill.name()
-                                                        + "' has no download slug."));
+                                                "Skill Hub skill has no download slug: "
+                                                        + SkillErrorMessages.describe(skill)
+                                                        + ". Set a public slug, path, or skill id"
+                                                        + " for findskill downloads."));
         String url =
                 StringUtils.stripEnd(findSkillDownloadUrl, "/")
                         + "/"
@@ -197,18 +202,28 @@ public class AgentKitSkillClient {
                 httpClient.send(request, HttpResponse.BodyHandlers.ofByteArray());
         if (response.statusCode() < 200 || response.statusCode() >= 300) {
             throw new IOException(
-                    "Failed to download Skill Hub skill '"
-                            + skill.name()
+                    "Failed to download Skill Hub skill "
+                            + SkillErrorMessages.describe(skill)
+                            + " from slug '"
+                            + slug
                             + "', HTTP status "
-                            + response.statusCode());
+                            + response.statusCode()
+                            + responseSnippet(response.body())
+                            + ". Check the findskill slug and download permissions.");
         }
         byte[] content = response.body();
         if (content.length > MAX_FINDSKILL_ARCHIVE_BYTES) {
-            throw new IOException("Skill Hub skill '" + skill.name() + "' archive exceeds 64 MiB.");
+            throw new IOException(
+                    "Skill Hub skill "
+                            + SkillErrorMessages.describe(skill)
+                            + " archive exceeds 64 MiB.");
         }
         if (!isZip(content)) {
             throw new IOException(
-                    "Skill Hub skill '" + skill.name() + "' download is not a zip archive.");
+                    "Skill Hub skill "
+                            + SkillErrorMessages.describe(skill)
+                            + " download is not a zip archive. Check the findskill slug and"
+                            + " download endpoint response.");
         }
         Files.createDirectories(targetZip.toAbsolutePath().getParent());
         Files.write(targetZip, content);
@@ -254,6 +269,11 @@ public class AgentKitSkillClient {
                 && content[1] == 'K'
                 && ((content[2] == 0x03 && content[3] == 0x04)
                         || (content[2] == 0x05 && content[3] == 0x06));
+    }
+
+    private static String responseSnippet(byte[] body) {
+        String snippet = SkillErrorMessages.responseSnippet(body);
+        return snippet.isBlank() ? "" : ", response body: " + snippet;
     }
 
     private static String skillPathPart(String path, int index) {

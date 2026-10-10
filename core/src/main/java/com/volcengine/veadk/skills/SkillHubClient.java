@@ -116,7 +116,11 @@ public class SkillHubClient {
         while (totalCount == null || skills.size() < totalCount) {
             if (pageNumber > MAX_PAGES) {
                 throw new IllegalStateException(
-                        "SkillHub ListSkills pagination exceeded " + MAX_PAGES + " pages.");
+                        "SkillHub ListSkills pagination exceeded "
+                                + MAX_PAGES
+                                + " pages for skill source '"
+                                + resolvedSkillSpaceId
+                                + "'. Check SkillHub pagination response metadata.");
             }
 
             JsonNode response =
@@ -162,9 +166,10 @@ public class SkillHubClient {
                         .orElseThrow(
                                 () ->
                                         new IllegalArgumentException(
-                                                "SkillHub skill "
-                                                        + skill.name()
-                                                        + " is missing skill id."));
+                                                "SkillHub skill is missing skill id: "
+                                                        + SkillErrorMessages.describe(skill)
+                                                        + ". Refresh the skill source metadata and"
+                                                        + " check the SkillHub response."));
 
         Map<String, Object> requestBody = new HashMap<>();
         requestBody.put("SkillId", skillId);
@@ -173,7 +178,10 @@ public class SkillHubClient {
 
         byte[] content = postBytes("/DownloadSkill", requestBody);
         if (content.length == 0) {
-            throw new IOException("SkillHub DownloadSkill returned empty content.");
+            throw new IOException(
+                    "SkillHub DownloadSkill returned empty content for "
+                            + SkillErrorMessages.describe(skill)
+                            + ". Check that the skill has a published archive.");
         }
         Files.createDirectories(targetZip.toAbsolutePath().getParent());
         Files.write(targetZip, content);
@@ -181,9 +189,23 @@ public class SkillHubClient {
 
     private JsonNode postJson(String path, Map<String, Object> requestBody) {
         try {
-            return JSONUtil.parseJson(postBytes(path, requestBody));
+            byte[] responseBody = postBytes(path, requestBody);
+            try {
+                return JSONUtil.parseJson(responseBody);
+            } catch (IOException e) {
+                throw new IllegalStateException(
+                        "SkillHub "
+                                + path
+                                + " returned invalid JSON"
+                                + responseSnippet(responseBody)
+                                + ": "
+                                + SkillErrorMessages.causeMessage(e),
+                        e);
+            }
         } catch (IOException e) {
-            throw new IllegalStateException("SkillHub " + path + " returned invalid JSON.", e);
+            throw new IllegalStateException(
+                    "SkillHub " + path + " request failed: " + SkillErrorMessages.causeMessage(e),
+                    e);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new IllegalStateException("Interrupted while calling SkillHub " + path + ".", e);
@@ -202,7 +224,13 @@ public class SkillHubClient {
                 httpClient.send(request, HttpResponse.BodyHandlers.ofByteArray());
         if (response.statusCode() < 200 || response.statusCode() >= 300) {
             throw new IOException(
-                    "SkillHub " + path + " failed, HTTP status " + response.statusCode() + ".");
+                    "SkillHub "
+                            + path
+                            + " failed, HTTP status "
+                            + response.statusCode()
+                            + responseSnippet(response.body())
+                            + ". Check SKILLHUB_HOST/SKILLHUB_REGION, credentials, and SkillHub"
+                            + " permissions.");
         }
         return response.body();
     }
@@ -381,6 +409,11 @@ public class SkillHubClient {
             }
         }
         return builder.toString();
+    }
+
+    private static String responseSnippet(byte[] body) {
+        String snippet = SkillErrorMessages.responseSnippet(body);
+        return snippet.isBlank() ? "" : ", response body: " + snippet;
     }
 
     private Optional<RemoteSkill> toRemoteSkill(JsonNode item, String skillSpaceId) {

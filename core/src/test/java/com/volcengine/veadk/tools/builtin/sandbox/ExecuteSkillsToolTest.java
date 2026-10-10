@@ -202,7 +202,32 @@ class ExecuteSkillsToolTest {
                                 toolContext())
                         .blockingGet();
 
-        assertThat(result.get("error").toString()).contains("env_vars is not supported");
+        assertError(result, "INVALID_ARGUMENT", "env_vars is not supported", false);
+    }
+
+    @Test
+    void runAsyncReturnsStructuredA2aError() throws Exception {
+        List<JsonNode> requests = new ArrayList<>();
+        HttpServer server =
+                startA2aServer(
+                        requests,
+                        List.of(
+                                """
+                                {"error":{"code":-32602,"message":"invalid skill request","data":{"field":"workflow_prompt"}}}
+                                """));
+        try (MockedStatic<EnvUtil> envUtilMock = mockStatic(EnvUtil.class)) {
+            envUtilMock.when(EnvUtil::getAgentKitSkillsToolId).thenReturn("skills-tool");
+
+            ExecuteSkillsTool tool = new ExecuteSkillsTool(wrapperFor(server));
+
+            Map<String, Object> result =
+                    tool.runAsync(ImmutableMap.of("workflow_prompt", "bad request"), toolContext())
+                            .blockingGet();
+
+            assertError(result, "SKILLS_SANDBOX_A2A_FAILED", "invalid skill request", false);
+        } finally {
+            server.stop(0);
+        }
     }
 
     private static HttpServer startA2aServer(List<JsonNode> requests, List<String> responses)
@@ -252,5 +277,16 @@ class ExecuteSkillsToolTest {
         when(context.userId()).thenReturn("user-1");
         when(context.sessionId()).thenReturn("session-1");
         return context;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static void assertError(
+            Map<String, Object> result, String code, String message, boolean retryable) {
+        assertThat(result).containsKey("error");
+        Map<String, Object> error = (Map<String, Object>) result.get("error");
+        assertThat(error).containsEntry("code", code);
+        assertThat(error.get("message").toString()).contains(message);
+        assertThat(error).containsEntry("retryable", retryable);
+        assertThat(error).containsKey("suggestion");
     }
 }

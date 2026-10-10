@@ -117,7 +117,7 @@ public class ExecuteSkillsTool extends BaseTool implements AutoCloseable {
         } catch (Exception e) {
             logger.error("Failed to execute skills sandbox request: {}", e.getMessage());
             logger.debug("Failed to execute skills sandbox request", e);
-            return ImmutableMap.of("error", e.getMessage());
+            return ToolErrorResponse.skillsSandbox(e);
         }
     }
 

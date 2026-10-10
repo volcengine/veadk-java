@@ -105,7 +105,7 @@ public class PollSkillTool extends BaseTool implements AutoCloseable {
         } catch (Exception e) {
             logger.error("Failed to poll skills sandbox task: {}", e.getMessage());
             logger.debug("Failed to poll skills sandbox task", e);
-            return ImmutableMap.of("error", e.getMessage());
+            return ToolErrorResponse.skillsSandbox(e);
         }
     }
 

@@ -133,7 +133,25 @@ class VeSkillSourceTest {
 
         assertThatThrownBy(() -> source.loadInstructions("missing-skill").blockingGet())
                 .hasCauseInstanceOf(SkillSourceException.class)
-                .hasMessageContaining("Skill 'missing-skill' not found");
+                .hasMessageContaining("Skill 'missing-skill' not found")
+                .hasMessageContaining("ss-test")
+                .hasMessageContaining("Available skills: [alpha-skill]");
+    }
+
+    @Test
+    void listFailureIncludesSourceAndPolicyHint() {
+        AgentKitSkillClient client = mock(AgentKitSkillClient.class);
+        when(client.listSkills("ss-test"))
+                .thenThrow(new IllegalStateException("permission denied"));
+
+        VeSkillSource source =
+                VeSkillSource.builder().skillSourceId("ss-test").client(client).build();
+
+        assertThatThrownBy(() -> source.listFrontmatters().blockingGet())
+                .hasCauseInstanceOf(SkillSourceException.class)
+                .hasMessageContaining("ss-test")
+                .hasMessageContaining("permission denied")
+                .hasMessageContaining("SKILL_SPACE_POLICY");
     }
 
     private static Path writeSkill(Path parent, String name, String body) throws Exception {

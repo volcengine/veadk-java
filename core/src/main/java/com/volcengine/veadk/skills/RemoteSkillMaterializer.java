@@ -87,7 +87,17 @@ public class RemoteSkillMaterializer {
             return finalDir;
         } catch (Exception e) {
             throw new IllegalStateException(
-                    "Failed to materialize remote skill " + skill.name(), e);
+                    "Failed to materialize remote skill "
+                            + skill.name()
+                            + " ("
+                            + SkillErrorMessages.describe(skill)
+                            + ") into cache directory '"
+                            + cacheDir
+                            + "': "
+                            + SkillErrorMessages.causeMessage(e)
+                            + ". Check the downloaded archive, SKILL.md frontmatter, zip paths,"
+                            + " and cache directory permissions.",
+                    e);
         }
     }
 

@@ -112,6 +112,26 @@ class RunCodeToolTest {
         }
     }
 
+    @Test
+    void runAsync_invalidArguments_returnsStructuredError() {
+        try (MockedStatic<EnvUtil> envUtilMock = mockStatic(EnvUtil.class);
+                MockedConstruction<AgentKitWrapper> ignored =
+                        mockConstruction(AgentKitWrapper.class)) {
+            mockEnv(envUtilMock);
+            RunCodeTool runCodeTool = new RunCodeTool();
+
+            ToolContext context = mock(ToolContext.class);
+            when(context.sessionId()).thenReturn("test-session");
+
+            Map<String, Object> result =
+                    runCodeTool
+                            .runAsync(ImmutableMap.of("language", "python3"), context)
+                            .blockingGet();
+
+            assertError(result, "INVALID_ARGUMENT", "code must be set.", false);
+        }
+    }
+
     private void mockEnv(MockedStatic<EnvUtil> envUtilMock) {
         envUtilMock.when(EnvUtil::getAgentKitToolId).thenReturn("test-tool-id");
         envUtilMock.when(EnvUtil::getAgentKitService).thenReturn("agentkit");
@@ -119,5 +139,16 @@ class RunCodeToolTest {
         envUtilMock.when(EnvUtil::getAgentKitHost).thenReturn("host.com");
         envUtilMock.when(EnvUtil::getAccessKey).thenReturn("ak");
         envUtilMock.when(EnvUtil::getSecretKey).thenReturn("sk");
+    }
+
+    @SuppressWarnings("unchecked")
+    private static void assertError(
+            Map<String, Object> result, String code, String message, boolean retryable) {
+        assertThat(result).containsKey("error");
+        Map<String, Object> error = (Map<String, Object>) result.get("error");
+        assertThat(error).containsEntry("code", code);
+        assertThat(error.get("message").toString()).contains(message);
+        assertThat(error).containsEntry("retryable", retryable);
+        assertThat(error).containsKey("suggestion");
     }
 }

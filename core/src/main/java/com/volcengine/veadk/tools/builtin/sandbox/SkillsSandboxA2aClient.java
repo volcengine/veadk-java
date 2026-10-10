@@ -103,7 +103,12 @@ final class SkillsSandboxA2aClient implements AutoCloseable {
         while (!TERMINAL_STATES.contains(taskState(task).orElse(""))) {
             long remainingMillis = remainingMillis(deadline);
             if (remainingMillis <= 0) {
-                throw new IllegalStateException("Timed out while waiting for A2A task " + taskId);
+                throw new ToolErrorResponse.ToolExecutionException(
+                        ToolErrorResponse.SKILLS_SANDBOX_TIMEOUT,
+                        "Timed out while waiting for A2A task " + taskId,
+                        "Retry with a longer timeout, or check whether the Skills Sandbox task is"
+                                + " still running.",
+                        true);
             }
             Thread.sleep(Math.min(pollInterval, remainingMillis));
             task = getTask(taskId, endpoint, deadline);
@@ -112,8 +117,12 @@ final class SkillsSandboxA2aClient implements AutoCloseable {
 
         String state = taskState(task).orElse("");
         if (!"completed".equals(state)) {
-            throw new IllegalStateException(
-                    "A2A task " + taskId + " ended with state " + state + ": " + task);
+            throw new ToolErrorResponse.ToolExecutionException(
+                    ToolErrorResponse.SKILLS_SANDBOX_A2A_FAILED,
+                    "A2A task " + taskId + " ended with state " + state + ".",
+                    "Inspect the task status and retry only after the underlying skill issue is"
+                            + " resolved.",
+                    false);
         }
 
         return taskResultText(task).filter(text -> !text.isBlank()).orElseGet(task::toString);
@@ -158,14 +167,29 @@ final class SkillsSandboxA2aClient implements AutoCloseable {
         Map<String, String> envs =
                 policyJson.map(json -> Map.of(SkillSpacePolicy.ENV_NAME, json)).orElseGet(Map::of);
 
-        return agentKitWrapper
-                .ensureSessionEndpoint(
-                        toolId, toolUserSessionId, Math.max(timeout, 1800), true, envs)
-                .endpoint()
-                .orElseThrow(
-                        () ->
-                                new IllegalStateException(
-                                        "AgentKit session endpoint is not available"));
+        try {
+            return agentKitWrapper
+                    .ensureSessionEndpoint(
+                            toolId, toolUserSessionId, Math.max(timeout, 1800), true, envs)
+                    .endpoint()
+                    .orElseThrow(
+                            () ->
+                                    new ToolErrorResponse.ToolExecutionException(
+                                            ToolErrorResponse.SKILLS_SANDBOX_SESSION_FAILED,
+                                            "AgentKit session endpoint is not available.",
+                                            "Check AGENTKIT_TOOL_ID_SKILLS or AGENTKIT_TOOL_ID and"
+                                                    + " confirm the Skills Sandbox tool is ready.",
+                                            true));
+        } catch (ToolErrorResponse.ToolExecutionException e) {
+            throw e;
+        } catch (RuntimeException e) {
+            throw new ToolErrorResponse.ToolExecutionException(
+                    ToolErrorResponse.SKILLS_SANDBOX_SESSION_FAILED,
+                    "Failed to prepare Skills Sandbox session: " + message(e),
+                    "Check AGENTKIT_TOOL_ID_SKILLS or AGENTKIT_TOOL_ID, credentials, and the"
+                            + " Skills Sandbox tool status.",
+                    true);
+        }
     }
 
     private JsonNode sendMessage(
@@ -238,27 +262,80 @@ final class SkillsSandboxA2aClient implements AutoCloseable {
                 Thread.sleep(Math.min(POLL_INTERVAL_MILLIS, remainingMillis(deadline)));
                 continue;
             }
-            throw new IllegalStateException(
+            throw new ToolErrorResponse.ToolExecutionException(
+                    ToolErrorResponse.SKILLS_SANDBOX_A2A_FAILED,
                     "AgentKit Skill /a2a request failed with HTTP "
                             + response.statusCode()
                             + ": "
-                            + response.body());
+                            + response.body(),
+                    "Check the Skills Sandbox endpoint, task payload, and sandbox runtime logs.",
+                    true);
         }
     }
 
     private static JsonNode resultTask(String operation, JsonNode response) {
         JsonNode error = response.path("error");
         if (!error.isMissingNode() && !error.isNull()) {
-            throw new IllegalStateException(error.toString());
+            throw new ToolErrorResponse.ToolExecutionException(
+                    ToolErrorResponse.SKILLS_SANDBOX_A2A_FAILED,
+                    operation + " failed: " + a2aErrorMessage(error),
+                    "Check the Skills Sandbox A2A error message and retry only if the error is"
+                            + " transient.",
+                    false);
         }
         JsonNode result = response.path("result");
         if (!result.isObject()) {
-            throw new IllegalStateException(operation + " response does not contain result task");
+            throw new ToolErrorResponse.ToolExecutionException(
+                    ToolErrorResponse.SKILLS_SANDBOX_A2A_FAILED,
+                    operation + " response does not contain result task.",
+                    "Check whether the Skills Sandbox returned a valid A2A task response.",
+                    false);
         }
         if (!"task".equals(result.path("kind").asText()) && result.path("status").isMissingNode()) {
-            throw new IllegalStateException(operation + " response result is not an A2A task");
+            throw new ToolErrorResponse.ToolExecutionException(
+                    ToolErrorResponse.SKILLS_SANDBOX_A2A_FAILED,
+                    operation + " response result is not an A2A task.",
+                    "Check whether the Skills Sandbox returned a valid A2A task response.",
+                    false);
         }
         return result;
+    }
+
+    private static String a2aErrorMessage(JsonNode error) {
+        String message = scalar(error.path("message")).orElse("");
+        String code = scalar(error.path("code")).orElse("");
+        JsonNode data = error.path("data");
+        StringBuilder builder = new StringBuilder();
+        if (!code.isBlank()) {
+            builder.append("code=").append(code);
+        }
+        if (!message.isBlank()) {
+            if (!builder.isEmpty()) {
+                builder.append(", ");
+            }
+            builder.append(message);
+        }
+        if (!data.isMissingNode() && !data.isNull()) {
+            if (!builder.isEmpty()) {
+                builder.append(", ");
+            }
+            builder.append("data=").append(data);
+        }
+        return builder.isEmpty() ? error.toString() : builder.toString();
+    }
+
+    private static String message(Throwable error) {
+        return error.getMessage() == null ? error.getClass().getSimpleName() : error.getMessage();
+    }
+
+    private static Optional<String> scalar(JsonNode node) {
+        if (!node.isMissingNode() && !node.isNull() && node.isValueNode()) {
+            String value = node.asText();
+            if (!value.isBlank()) {
+                return Optional.of(value);
+            }
+        }
+        return Optional.empty();
     }
 
     private static Optional<String> taskState(JsonNode task) {

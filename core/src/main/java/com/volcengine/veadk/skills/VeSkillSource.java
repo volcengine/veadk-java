@@ -108,7 +108,8 @@ public final class VeSkillSource implements SkillSource {
 
     private RemoteSkill findRemoteSkill(String skillName) throws SkillSourceException {
         String requestedSkillName = requireText(skillName, "skillName must be set.");
-        return listRemoteSkills().stream()
+        List<RemoteSkill> skills = listRemoteSkills();
+        return skills.stream()
                 .filter(skill -> requestedSkillName.equals(skill.name()))
                 .findFirst()
                 .orElseThrow(
@@ -118,7 +119,9 @@ public final class VeSkillSource implements SkillSource {
                                                 + requestedSkillName
                                                 + "' not found in '"
                                                 + skillSourceId
-                                                + "'.",
+                                                + "'. Available skills: "
+                                                + availableSkillNames(skills)
+                                                + ".",
                                         SKILL_NOT_FOUND));
     }
 
@@ -129,10 +132,19 @@ public final class VeSkillSource implements SkillSource {
             throw new SkillSourceException(e.getMessage(), SKILL_LOAD_ERROR, e);
         } catch (Exception e) {
             throw new SkillSourceException(
-                    "Failed to list skills from remote skill source '" + skillSourceId + "'.",
+                    "Failed to list skills from remote skill source '"
+                            + skillSourceId
+                            + "': "
+                            + SkillErrorMessages.causeMessage(e)
+                            + ". Check the source id, credentials, permissions, and"
+                            + " SKILL_SPACE_POLICY if it is configured.",
                     SKILL_LOAD_ERROR,
                     e);
         }
+    }
+
+    private static List<String> availableSkillNames(List<RemoteSkill> skills) {
+        return skills.stream().map(RemoteSkill::name).toList();
     }
 
     private static Frontmatter toFrontmatter(RemoteSkill skill) throws SkillSourceException {

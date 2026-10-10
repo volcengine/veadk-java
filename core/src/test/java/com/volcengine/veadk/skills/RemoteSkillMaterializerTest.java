@@ -92,6 +92,9 @@ class RemoteSkillMaterializerTest {
         assertThatThrownBy(() -> materializer.materialize(ALPHA))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("Failed to materialize remote skill alpha-skill")
+                .hasMessageContaining("sourceId='ss-test'")
+                .hasMessageContaining("cache directory")
+                .hasMessageContaining("SKILL.md frontmatter")
                 .hasRootCauseMessage("Unsafe path detected in zip archive: ../evil.txt");
     }
 

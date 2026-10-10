@@ -109,7 +109,7 @@ public class InvokeSkillTool extends BaseTool implements AutoCloseable {
         } catch (Exception e) {
             logger.error("Failed to invoke skills sandbox task: {}", e.getMessage());
             logger.debug("Failed to invoke skills sandbox task", e);
-            return ImmutableMap.of("error", e.getMessage());
+            return ToolErrorResponse.skillsSandbox(e);
         }
     }
 

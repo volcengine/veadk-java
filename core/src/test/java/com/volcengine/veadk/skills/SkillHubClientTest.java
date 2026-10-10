@@ -16,6 +16,7 @@
 package com.volcengine.veadk.skills;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
@@ -153,6 +154,58 @@ class SkillHubClientTest {
                             "HMAC-SHA256 Credential=ak/20261009/cn-test/skillhub/request,"
                                     + " SignedHeaders=");
             assertThat(authRef.get()).contains("Signature=");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void listSkillsHttpFailureIncludesSkillHubContext() throws Exception {
+        HttpServer server =
+                startServer(
+                        exchange ->
+                                respond(
+                                        exchange,
+                                        403,
+                                        "permission denied".getBytes(StandardCharsets.UTF_8)));
+        try {
+            SkillHubClient client = skillHubClient(server);
+
+            assertThatThrownBy(() -> client.listSkills("sp-test"))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasRootCauseInstanceOf(IOException.class)
+                    .hasMessageContaining("/ListSkills")
+                    .hasMessageContaining("HTTP status 403")
+                    .hasMessageContaining("permission denied")
+                    .hasMessageContaining("SKILLHUB_HOST/SKILLHUB_REGION")
+                    .hasMessageContaining("SkillHub permissions");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void downloadSkillEmptyContentIncludesSkillContext(@TempDir Path tempDir) throws Exception {
+        HttpServer server = startServer(exchange -> respond(exchange, 200, new byte[0]));
+        try {
+            SkillHubClient client = skillHubClient(server);
+            RemoteSkill skill =
+                    new RemoteSkill(
+                            "hub-alpha",
+                            "Alpha from hub.",
+                            "hub-alpha",
+                            "sp-test",
+                            null,
+                            "skill-alpha",
+                            "hub-alpha",
+                            "skillhub",
+                            "version-alpha");
+
+            assertThatThrownBy(() -> client.downloadSkill(skill, tempDir.resolve("hub-alpha.zip")))
+                    .isInstanceOf(IOException.class)
+                    .hasMessageContaining("hub-alpha")
+                    .hasMessageContaining("sp-test")
+                    .hasMessageContaining("published archive");
         } finally {
             server.stop(0);
         }

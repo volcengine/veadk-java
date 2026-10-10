@@ -165,6 +165,20 @@ Agent agent = Agent.builder()
     .build();
 ```
 
+Sandbox 工具调用失败时会返回结构化错误。Agent 可以读取 `error.code`、
+`error.message`、`error.suggestion` 和 `error.retryable` 来解释失败原因或判断是否重试：
+
+```json
+{
+  "error": {
+    "code": "SKILLS_SANDBOX_A2A_FAILED",
+    "message": "message/send failed: invalid skill request",
+    "suggestion": "Check the Skills Sandbox A2A error message and retry only if the error is transient.",
+    "retryable": false
+  }
+}
+```
+
 metadata 输出包含：
 
 - Agent 基础字段：`id`、`name`、`description`、`instructionSummary`、`modelName`、

@@ -16,6 +16,7 @@
 package com.volcengine.veadk.skills;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.verify;
@@ -154,6 +155,39 @@ class AgentKitSkillClientTest {
     }
 
     @Test
+    void downloadSkillFailureIncludesRemoteContext(@TempDir Path tempDir) throws Exception {
+        HttpServer server = startDownloadServer(403, "denied");
+        try {
+            AgentKitWrapper wrapper = mock(AgentKitWrapper.class);
+            when(wrapper.generateTempTosObjectDownloadUrl("skill-alpha", "v1"))
+                    .thenReturn("http://127.0.0.1:" + server.getAddress().getPort() + "/skill.zip");
+            AgentKitSkillClient client =
+                    new AgentKitSkillClient(wrapper, HttpClient.newHttpClient());
+            RemoteSkill skill =
+                    new RemoteSkill(
+                            "alpha-skill",
+                            "Alpha skill.",
+                            "skills/skill-alpha/v1/alpha.zip",
+                            "ss-test",
+                            "bucket",
+                            "skill-alpha",
+                            null,
+                            "skillspace",
+                            "v1");
+
+            assertThatThrownBy(() -> client.downloadSkill(skill, tempDir.resolve("alpha.zip")))
+                    .isInstanceOf(IOException.class)
+                    .hasMessageContaining("alpha-skill")
+                    .hasMessageContaining("ss-test")
+                    .hasMessageContaining("HTTP status 403")
+                    .hasMessageContaining("denied")
+                    .hasMessageContaining("TOS download permissions");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
     void listSkillsDelegatesSkillHubSource() {
         SkillHubClient skillHubClient = mock(SkillHubClient.class);
         RemoteSkill skill =
@@ -236,9 +270,52 @@ class AgentKitSkillClientTest {
         }
     }
 
+    @Test
+    void downloadFindSkillFailureIncludesSlugAndBody(@TempDir Path tempDir) throws Exception {
+        HttpServer server = startDownloadServer(404, "missing public skill");
+        try {
+            AgentKitSkillClient client =
+                    new AgentKitSkillClient(
+                            mock(AgentKitWrapper.class),
+                            HttpClient.newHttpClient(),
+                            mock(SkillHubClient.class),
+                            "http://127.0.0.1:"
+                                    + server.getAddress().getPort()
+                                    + "/v1/skills/download");
+            RemoteSkill skill =
+                    new RemoteSkill(
+                            "public-skill",
+                            "Public skill.",
+                            "",
+                            "findskill",
+                            null,
+                            null,
+                            "team/public-skill",
+                            "findskill",
+                            "v1");
+
+            assertThatThrownBy(() -> client.downloadSkill(skill, tempDir.resolve("public.zip")))
+                    .isInstanceOf(IOException.class)
+                    .hasMessageContaining("public-skill")
+                    .hasMessageContaining("team/public-skill")
+                    .hasMessageContaining("HTTP status 404")
+                    .hasMessageContaining("missing public skill")
+                    .hasMessageContaining("findskill slug");
+        } finally {
+            server.stop(0);
+        }
+    }
+
     private static HttpServer startDownloadServer(String body) throws IOException {
+        return startDownloadServer(200, body);
+    }
+
+    private static HttpServer startDownloadServer(int status, String body) throws IOException {
         HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
-        server.createContext("/skill.zip", exchange -> respond(exchange, body));
+        server.createContext("/skill.zip", exchange -> respond(exchange, status, body));
+        server.createContext(
+                "/v1/skills/download/team/public-skill",
+                exchange -> respond(exchange, status, body));
         server.start();
         return server;
     }
@@ -252,8 +329,12 @@ class AgentKitSkillClientTest {
     }
 
     private static void respond(HttpExchange exchange, String body) throws IOException {
+        respond(exchange, 200, body);
+    }
+
+    private static void respond(HttpExchange exchange, int status, String body) throws IOException {
         byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
-        exchange.sendResponseHeaders(200, bytes.length);
+        exchange.sendResponseHeaders(status, bytes.length);
         exchange.getResponseBody().write(bytes);
         exchange.close();
     }
