@@ -1,4 +1,4 @@
-package com.volcengine.veadk.tools.sandbox;
+package com.volcengine.veadk.tools.builtin.sandbox;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyInt;

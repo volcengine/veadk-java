@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package com.volcengine.veadk.tools.websearch;
+package com.volcengine.veadk.tools.builtin.websearch;
 
 import com.google.adk.tools.BaseTool;
 import com.google.adk.tools.ToolContext;

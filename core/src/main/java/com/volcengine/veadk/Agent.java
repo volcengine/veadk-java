@@ -37,7 +37,7 @@ import com.volcengine.veadk.model.ArkLlm;
 import com.volcengine.veadk.model.ArkLlmConfig;
 import com.volcengine.veadk.skills.CompositeSkillSource;
 import com.volcengine.veadk.skills.SingleSkillDirectorySource;
-import com.volcengine.veadk.tools.knowledgebase.LoadKnowledgebaseTool;
+import com.volcengine.veadk.tools.builtin.knowledgebase.LoadKnowledgebaseTool;
 import io.reactivex.rxjava3.core.Completable;
 import io.reactivex.rxjava3.core.Maybe;
 import java.nio.file.Files;

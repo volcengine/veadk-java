@@ -19,8 +19,8 @@ import com.google.adk.tools.skills.SkillToolset;
 import com.volcengine.veadk.Agent;
 import com.volcengine.veadk.Runner;
 import com.volcengine.veadk.skills.VeSkillSource;
-import com.volcengine.veadk.tools.sandbox.InvokeSkillTool;
-import com.volcengine.veadk.tools.sandbox.PollSkillTool;
+import com.volcengine.veadk.tools.builtin.sandbox.InvokeSkillTool;
+import com.volcengine.veadk.tools.builtin.sandbox.PollSkillTool;
 
 /** Demonstrates remote skill discovery with non-blocking Skills Sandbox execution. */
 public class RemoteSkillsAsyncExpenseReviewAgent {

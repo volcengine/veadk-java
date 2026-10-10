@@ -37,7 +37,7 @@ import com.volcengine.veadk.knowledgebase.KnowledgebaseEntry;
 import com.volcengine.veadk.knowledgebase.SearchKnowledgebaseResponse;
 import com.volcengine.veadk.memory.SaveSessionToMemoryCallback;
 import com.volcengine.veadk.model.ArkLlm;
-import com.volcengine.veadk.tools.knowledgebase.LoadKnowledgebaseTool;
+import com.volcengine.veadk.tools.builtin.knowledgebase.LoadKnowledgebaseTool;
 import io.reactivex.rxjava3.core.Flowable;
 import io.reactivex.rxjava3.core.Maybe;
 import io.reactivex.rxjava3.core.Single;

@@ -163,7 +163,7 @@ For Skills Sandbox delegation, configure an AgentKit Skill Space ID and expose
 only the `execute_skills` tool:
 
 ```java
-import com.volcengine.veadk.tools.sandbox.ExecuteSkillsTool;
+import com.volcengine.veadk.tools.builtin.sandbox.ExecuteSkillsTool;
 
 Agent agent = Agent.builder()
     .name("remote-sandbox-agent")

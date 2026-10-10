@@ -1,4 +1,4 @@
-package com.volcengine.veadk.tools.knowledgebase;
+package com.volcengine.veadk.tools.builtin.knowledgebase;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;

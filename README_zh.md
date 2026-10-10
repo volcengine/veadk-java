@@ -155,7 +155,7 @@ Agent agent = Agent.builder()
 工具：
 
 ```java
-import com.volcengine.veadk.tools.sandbox.ExecuteSkillsTool;
+import com.volcengine.veadk.tools.builtin.sandbox.ExecuteSkillsTool;
 
 Agent agent = Agent.builder()
     .name("remote-sandbox-agent")

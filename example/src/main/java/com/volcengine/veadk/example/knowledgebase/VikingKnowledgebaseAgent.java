@@ -27,7 +27,7 @@ import com.google.genai.types.Part;
 import com.volcengine.veadk.Runner;
 import com.volcengine.veadk.knowledgebase.KnowledgeBase;
 import com.volcengine.veadk.model.ArkLlm;
-import com.volcengine.veadk.tools.knowledgebase.LoadKnowledgebaseTool;
+import com.volcengine.veadk.tools.builtin.knowledgebase.LoadKnowledgebaseTool;
 import io.reactivex.rxjava3.core.Flowable;
 import java.io.IOException;
 import java.util.Scanner;

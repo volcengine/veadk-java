@@ -1,4 +1,4 @@
-package com.volcengine.veadk.tools.websearch;
+package com.volcengine.veadk.tools.builtin.websearch;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;

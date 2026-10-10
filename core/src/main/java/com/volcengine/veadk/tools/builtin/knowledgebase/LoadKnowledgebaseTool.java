@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package com.volcengine.veadk.tools.knowledgebase;
+package com.volcengine.veadk.tools.builtin.knowledgebase;
 
 import com.google.adk.models.LlmRequest;
 import com.google.adk.tools.Annotations;

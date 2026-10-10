@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package com.volcengine.veadk.tools.knowledgebase;
+package com.volcengine.veadk.tools.builtin.knowledgebase;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.volcengine.veadk.knowledgebase.KnowledgebaseEntry;

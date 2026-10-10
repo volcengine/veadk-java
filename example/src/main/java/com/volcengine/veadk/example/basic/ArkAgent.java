@@ -23,9 +23,9 @@ import com.google.adk.tools.LoadMemoryTool;
 import com.volcengine.veadk.knowledgebase.KnowledgeBase;
 import com.volcengine.veadk.memory.SaveSessionToMemoryCallback;
 import com.volcengine.veadk.model.ArkLlm;
-import com.volcengine.veadk.tools.knowledgebase.LoadKnowledgebaseTool;
-import com.volcengine.veadk.tools.sandbox.RunCodeTool;
-import com.volcengine.veadk.tools.websearch.WebSearchTool;
+import com.volcengine.veadk.tools.builtin.knowledgebase.LoadKnowledgebaseTool;
+import com.volcengine.veadk.tools.builtin.sandbox.RunCodeTool;
+import com.volcengine.veadk.tools.builtin.websearch.WebSearchTool;
 import java.util.Map;
 
 public class ArkAgent {

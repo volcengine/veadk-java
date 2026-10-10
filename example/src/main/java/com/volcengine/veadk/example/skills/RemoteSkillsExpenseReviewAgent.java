@@ -17,7 +17,7 @@ package com.volcengine.veadk.example.skills;
 
 import com.volcengine.veadk.Agent;
 import com.volcengine.veadk.Runner;
-import com.volcengine.veadk.tools.sandbox.ExecuteSkillsTool;
+import com.volcengine.veadk.tools.builtin.sandbox.ExecuteSkillsTool;
 
 /** Demonstrates delegating an expense pre-review workflow to a remote Skills Sandbox. */
 public class RemoteSkillsExpenseReviewAgent {

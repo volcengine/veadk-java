@@ -1,4 +1,4 @@
-package com.volcengine.veadk.tools.sandbox;
+package com.volcengine.veadk.tools.builtin.sandbox;
 
 import com.google.adk.tools.mcp.McpToolset;
 import com.google.adk.tools.mcp.StreamableHttpServerParameters;
