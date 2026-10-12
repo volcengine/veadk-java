@@ -45,10 +45,10 @@ var agent = Agent.builder()
 
 若模型没有执行要求的工具调用或未返回用量，示例会明确失败。参数字段是否正确映射由自动化测试检查，真实模型示例验证接口接受配置以及工具调用闭环。
 
-本批覆盖输入、输出与总用量，尚未映射缓存命中及推理 Token 明细。Responses API、结构化输出、模型 fallback 和 Planner 按后续批次交付。
+本批覆盖输入、输出与总用量，尚未映射缓存命中及推理 Token 明细。Responses API 与结构化输出的接入方式见 [Ark Responses](ark-responses.md)。
 
 ## English
 
 Ark Chat Completions now forwards temperature, top-p and output limits in both modes, preserves tool-call IDs and JSON results across turns, and exposes prompt/completion/total usage on responses and ADK events. Streaming usage is attached only to the final aggregate. Missing upstream usage stays absent; interrupted streams and malformed tool arguments surface errors.
 
-Use `GenerateContentConfig` on the Agent or LlmRequest. When managing history directly, retain each returned Content and put tool results in a separate Content with the matching `FunctionResponse.id`. Legacy history without IDs is accepted only when a tool name identifies one pending call. Run `ArkInferenceExample` using the commands above; it makes live requests with environment-provided credentials and closes the client on completion. Responses API and detailed cached/reasoning usage are outside this batch.
+Use `GenerateContentConfig` on the Agent or LlmRequest. When managing history directly, retain each returned Content and put tool results in a separate Content with the matching `FunctionResponse.id`. Legacy history without IDs is accepted only when a tool name identifies one pending call. Run `ArkInferenceExample` using the commands above; it makes live requests with environment-provided credentials and closes the client on completion. See [Ark Responses](ark-responses.md) for Responses API and structured output. Detailed cached/reasoning usage is not mapped by the Chat Completions adapter.

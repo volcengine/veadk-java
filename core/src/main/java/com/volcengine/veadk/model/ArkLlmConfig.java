@@ -21,6 +21,11 @@ import org.apache.commons.lang3.StringUtils;
 /** Typed configuration for {@link ArkLlm}. */
 public final class ArkLlmConfig {
 
+    public enum Api {
+        CHAT_COMPLETIONS,
+        RESPONSES
+    }
+
     public static final String DEFAULT_API_BASE = "https://ark.cn-beijing.volces.com/api/v3/";
     public static final String MODEL_AGENT_API_BASE = "MODEL_AGENT_API_BASE";
 
@@ -28,12 +33,16 @@ public final class ArkLlmConfig {
     private final String apiKey;
     private final String apiBase;
     private final String thinking;
+    private final Api api;
+    private final boolean responsesStore;
 
     private ArkLlmConfig(Builder builder) {
         this.modelName = requireText(builder.modelName, "modelName must be set.");
         this.apiKey = resolveApiKey(builder.apiKey);
         this.apiBase = resolveApiBase(builder.apiBase);
         this.thinking = StringUtils.trimToNull(builder.thinking);
+        this.api = java.util.Objects.requireNonNull(builder.api, "api must be set.");
+        this.responsesStore = builder.responsesStore;
     }
 
     public static Builder builder() {
@@ -58,6 +67,14 @@ public final class ArkLlmConfig {
 
     public String getThinking() {
         return thinking;
+    }
+
+    public Api getApi() {
+        return api;
+    }
+
+    public boolean isResponsesStore() {
+        return responsesStore;
     }
 
     private static String resolveApiKey(String explicitApiKey) {
@@ -106,6 +123,8 @@ public final class ArkLlmConfig {
         private String apiKey;
         private String apiBase;
         private String thinking;
+        private Api api = Api.CHAT_COMPLETIONS;
+        private boolean responsesStore = true;
 
         private Builder() {}
 
@@ -135,6 +154,17 @@ public final class ArkLlmConfig {
 
         public ArkLlmConfig build() {
             return new ArkLlmConfig(this);
+        }
+
+        public Builder api(Api api) {
+            this.api = api;
+            return this;
+        }
+
+        /** Store Responses on Ark to allow previous-response reuse. */
+        public Builder responsesStore(boolean responsesStore) {
+            this.responsesStore = responsesStore;
+            return this;
         }
     }
 }

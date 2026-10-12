@@ -125,6 +125,9 @@ public final class ArkLlm extends BaseLlm implements AutoCloseable {
      */
     @Override
     public Flowable<LlmResponse> generateContent(LlmRequest llmRequest, boolean stream) {
+        if (config.getApi() == ArkLlmConfig.Api.RESPONSES) {
+            return new ArkResponsesAdapter(arkService, config).generate(llmRequest, stream);
+        }
         // Convert ADK request to Ark request format
         ChatCompletionRequest arkRequest = toArkRequest(llmRequest);
         if (stream) {
@@ -422,6 +425,13 @@ public final class ArkLlm extends BaseLlm implements AutoCloseable {
                         });
 
         // Add thinking parameter if set
+        llmRequest
+                .config()
+                .ifPresent(
+                        generation -> {
+                            var format = ArkStructuredOutput.chatFormat(generation);
+                            if (format != null) request.setResponseFormat(format);
+                        });
         if (null != thinking) {
             request.setThinking(thinking);
         }
