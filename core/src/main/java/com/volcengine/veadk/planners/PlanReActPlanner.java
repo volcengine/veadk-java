@@ -46,35 +46,58 @@ public final class PlanReActPlanner implements Planner {
             return response;
         }
         List<Part> parts = new ArrayList<>();
+        List<Part> textRun = new ArrayList<>();
         for (Part part : response.content().orElseThrow().parts().orElse(List.of())) {
-            if (part.text().isEmpty()) {
+            // Native model thoughts are opaque. Never reinterpret their text as a final answer.
+            if (part.text().isEmpty() || part.thought().orElse(false)) {
+                processTextRun(textRun, parts);
+                textRun.clear();
                 parts.add(part);
-                continue;
-            }
-            String text = part.text().orElseThrow();
-            if (response.partial().orElse(false)) {
+            } else if (response.partial().orElse(false)) {
                 // Tags can straddle stream chunks. Only the complete final response is split.
                 parts.add(part.toBuilder().thought(true).build());
-                continue;
-            }
-            int split = text.lastIndexOf(FINAL_ANSWER_TAG);
-            if (split >= 0) {
-                String thought = text.substring(0, split);
-                String answer = text.substring(split + FINAL_ANSWER_TAG.length());
-                if (!thought.isEmpty()) {
-                    parts.add(part.toBuilder().text(thought).thought(true).build());
-                }
-                if (!answer.isEmpty()) {
-                    parts.add(part.toBuilder().text(answer).thought(false).build());
-                }
-            } else if (THOUGHT_TAGS.stream().anyMatch(text.stripLeading()::startsWith)) {
-                parts.add(part.toBuilder().thought(true).build());
             } else {
-                parts.add(part);
+                textRun.add(part);
             }
         }
+        processTextRun(textRun, parts);
         return response.toBuilder()
                 .content(response.content().orElseThrow().toBuilder().parts(parts).build())
                 .build();
+    }
+
+    private static void processTextRun(List<Part> textRun, List<Part> result) {
+        StringBuilder joined = new StringBuilder();
+        textRun.forEach(part -> joined.append(part.text().orElseThrow()));
+        String text = joined.toString();
+        int split = text.lastIndexOf(FINAL_ANSWER_TAG);
+        if (split < 0) {
+            boolean planning = THOUGHT_TAGS.stream().anyMatch(text.stripLeading()::startsWith);
+            textRun.forEach(
+                    part -> result.add(planning ? part.toBuilder().thought(true).build() : part));
+            return;
+        }
+        int answerStart = split + FINAL_ANSWER_TAG.length();
+        int offset = 0;
+        for (Part part : textRun) {
+            String fragment = part.text().orElseThrow();
+            int end = offset + fragment.length();
+            // Slice in the original Part to retain its metadata even when tags cross boundaries.
+            if (offset < split) {
+                result.add(
+                        part.toBuilder()
+                                .text(fragment.substring(0, Math.min(end, split) - offset))
+                                .thought(true)
+                                .build());
+            }
+            if (end > answerStart) {
+                result.add(
+                        part.toBuilder()
+                                .text(fragment.substring(Math.max(offset, answerStart) - offset))
+                                .thought(false)
+                                .build());
+            }
+            offset = end;
+        }
     }
 }

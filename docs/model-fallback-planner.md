@@ -53,6 +53,8 @@ ADK Java 1.9.0 未提供 Python 的 `BasePlanner` 接口。本 SDK 提供 `com.v
 
 `Runner.run()` 返回最终答案中的普通文本；规划内容以 `thought=true` 保存在事件里。使用 `runAsync()` 的应用应按 `Part.thought` 区分规划与用户答案。流式文字分片全部标为 thought，在完整最终响应中再解析 `/*FINAL_ANSWER*/`，因此用户答案在最终响应时交付。模型适配器应在非 partial 最终响应中提供完整内容，Ark 与 VeADK 的标准流式适配路径遵循此约定。无标签的最终普通文本保持原样。
 
+Planner 会重写响应 Content，因此与 Responses 会话续接组合时暂时使用完整历史请求，保留功能但不启用 previous_response_id 续接优化。原生 `thought=true` 内容保持不变，连续文本 Part 中跨边界的规划标签会统一解析。
+
 自定义 Planner 实现 `buildPlanningInstruction(LlmRequest)` 和 `processPlanningResponse(LlmResponse)`，需保证可被并发请求共享，并保留工具调用、usage 和 metadata。可直接使用 `new PlanningLlm(model, planner)` 和 `new FallbackLlm(primary, fallbacks)`，或使用 Agent builder 组合二者；builder 在 fallback 外层应用 planner，避免把规划处理异常当作端点故障再次请求模型。
 
 ## English
@@ -60,5 +62,7 @@ ADK Java 1.9.0 未提供 Python 的 `BasePlanner` 接口。本 SDK 提供 `com.v
 Configure `.modelFallbacks(...)` with independently configured `BaseLlm` instances. Each generation starts at the primary and attempts fallback endpoints in order only if an exception occurs before any response. Once any response is emitted, errors propagate without replay. Requests preserve contents, tools and generation settings while selecting the actual endpoint's model name. Cancellation, normal empty completion and response-level error fields do not trigger fallback. Live connections are unsupported.
 
 `.planner(new PlanReActPlanner())` enables prompt-based planning through VeADK's `Planner` extension; ADK Java 1.9.0 has no Python-compatible `BasePlanner` API. The normal ADK tool loop remains in use. Planning text is marked as thought in events, and `Runner.run()` returns only non-thought text. Streaming partial text is marked as thought until the complete final response can be split safely across tags. This requires adapters to emit accumulated content in their final non-partial response. Custom planners must be thread-safe and preserve tool calls, usage and provider metadata.
+
+When a planner rewrites response content, Responses session continuation falls back to full history; previous_response_id optimization is not applied to that combination. Native thought parts remain opaque, and tags split across adjacent text parts are parsed together.
 
 The deterministic regression tests cover endpoint selection, failures before and after output, cancellation, resource closure, request preservation, planning tags, and a real ADK Runner tool round trip using stub model responses. They do not certify remote model quality or availability.

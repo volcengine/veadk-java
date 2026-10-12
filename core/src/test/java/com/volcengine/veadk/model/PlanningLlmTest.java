@@ -98,6 +98,67 @@ class PlanningLlmTest {
     }
 
     @Test
+    void completeResponseParsesTagsAcrossTextPartsAndPreservesToolParts() {
+        Part call =
+                Part.builder()
+                        .functionCall(
+                                FunctionCall.builder()
+                                        .id("call-1")
+                                        .name("lookup")
+                                        .args(Map.of("key", "a"))
+                                        .build())
+                        .build();
+        LlmResponse processed =
+                planner.processPlanningResponse(
+                        response(
+                                Part.fromText("/*PLANNING*/first"),
+                                Part.fromText("planning continuation"),
+                                Part.fromText("/*FINAL_"),
+                                Part.fromText("ANSWER*/done"),
+                                call));
+        var parts = processed.content().orElseThrow().parts().orElseThrow();
+        assertThat(parts).hasSize(4);
+        assertThat(parts.get(0).thought()).contains(true);
+        assertThat(parts.get(1).thought()).contains(true);
+        assertThat(parts.get(2).text()).contains("done");
+        assertThat(parts.get(2).thought()).contains(false);
+        assertThat(parts.get(3)).isSameAs(call);
+        var model =
+                new FallbackLlmTest.Stub(
+                        "model",
+                        r ->
+                                Flowable.just(
+                                        response(
+                                                Part.fromText("/*PLANNING*/first"),
+                                                Part.fromText("planning continuation"),
+                                                Part.fromText("/*FINAL_"),
+                                                Part.fromText("ANSWER*/done"))));
+        Agent agent =
+                Agent.builder().name("multipart_planner").model(model).planner(planner).build();
+        assertThat(new Runner(agent).run("hello")).isEqualTo("done");
+        agent.close().blockingAwait();
+    }
+
+    @Test
+    void nativeThoughtContainingFinalAnswerTagRemainsOpaque() {
+        Part nativeThought =
+                Part.builder().text("private /*FINAL_ANSWER*/still private").thought(true).build();
+        LlmResponse input = response(nativeThought, Part.fromText("/*FINAL_ANSWER*/public answer"));
+        var processed = planner.processPlanningResponse(input);
+        assertThat(processed.content().orElseThrow().parts().orElseThrow().get(0))
+                .isSameAs(nativeThought);
+        var model = new FallbackLlmTest.Stub("model", r -> Flowable.just(input));
+        Agent agent =
+                Agent.builder()
+                        .name("native_thought_planner")
+                        .model(model)
+                        .planner(planner)
+                        .build();
+        assertThat(new Runner(agent).run("hello")).isEqualTo("public answer");
+        agent.close().blockingAwait();
+    }
+
+    @Test
     void leavesUntaggedTextAndContentlessEventsUnchanged() {
         LlmResponse plain = response(Part.fromText("hello"));
         assertThat(planner.processPlanningResponse(plain)).isEqualTo(plain);
