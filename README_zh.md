@@ -383,3 +383,8 @@ Java Agent 当前不支持以下 Python 侧能力：
 
 ## 许可证
 本项目使用 Apache License 2.0，详见 `LICENSE` 文件。
+
+## AgentKit Runtime HTTP 示例
+
+[通过 AgentKit Simple App HTTP 接口运行 Java Agent](docs/agentkit-runtime.md)，
+包含本地启动、容器封装与 HTTP 契约测试。CLI 原生 Java 脚手架和构建仍需上游支持。

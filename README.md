@@ -408,3 +408,9 @@ For vulnerability reporting and supported versions, see [SECURITY.md](SECURITY.m
 
 ## License
 This project uses the Apache License 2.0; see the `LICENSE` file for details.
+
+## AgentKit Runtime HTTP example
+
+[Run a Java agent with AgentKit Simple App HTTP routes](docs/agentkit-runtime.md).
+The example includes local startup, container packaging and HTTP contract tests.
+Native AgentKit CLI Java scaffolding and builds require upstream CLI support.
