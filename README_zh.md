@@ -387,4 +387,4 @@ Java Agent 当前不支持以下 Python 侧能力：
 ## AgentKit Runtime HTTP 示例
 
 [通过 AgentKit Simple App HTTP 接口运行 Java Agent](docs/agentkit-runtime.md)，
-包含本地启动、容器封装与 HTTP 契约测试。CLI 原生 Java 脚手架和构建仍需上游支持。
+包含本地启动、容器封装与 HTTP 契约测试。Java 脚手架和构建需使用包含 `basic_java` 生命周期模板的 AgentKit CLI。
