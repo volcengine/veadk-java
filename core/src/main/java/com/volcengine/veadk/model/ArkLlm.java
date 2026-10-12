@@ -22,16 +22,18 @@ import com.google.adk.models.BaseLlmConnection;
 import com.google.adk.models.LlmRequest;
 import com.google.adk.models.LlmResponse;
 import com.google.adk.tools.BaseTool;
-import com.google.common.collect.ImmutableMap;
 import com.google.genai.types.Content;
+import com.google.genai.types.FunctionCall;
 import com.google.genai.types.FunctionDeclaration;
-import com.google.genai.types.FunctionResponse;
+import com.google.genai.types.GenerateContentResponseUsageMetadata;
 import com.google.genai.types.Part;
 import com.google.genai.types.Schema;
+import com.volcengine.ark.runtime.model.Usage;
 import com.volcengine.ark.runtime.model.completion.chat.ChatCompletionChunk;
 import com.volcengine.ark.runtime.model.completion.chat.ChatCompletionRequest;
 import com.volcengine.ark.runtime.model.completion.chat.ChatCompletionResult;
 import com.volcengine.ark.runtime.model.completion.chat.ChatFunction;
+import com.volcengine.ark.runtime.model.completion.chat.ChatFunctionCall;
 import com.volcengine.ark.runtime.model.completion.chat.ChatMessage;
 import com.volcengine.ark.runtime.model.completion.chat.ChatMessageRole;
 import com.volcengine.ark.runtime.model.completion.chat.ChatTool;
@@ -44,6 +46,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.TreeMap;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -56,20 +59,12 @@ import org.slf4j.LoggerFactory;
 /**
  * Ark (Volcengine Ark Runtime) implementation of BaseLlm.
  *
- * <p>This adapter maps ADK's LlmRequest/LlmResponse to Ark Responses API semantics and supports
+ * <p>This adapter maps ADK's LlmRequest/LlmResponse to Ark Chat Completions semantics and supports
  * both streaming and aggregated (non-streaming) generation.
  */
 public final class ArkLlm extends BaseLlm implements AutoCloseable {
 
     private static final Logger log = LoggerFactory.getLogger(ArkLlm.class);
-
-    // Role mapping from ADK roles to Ark roles
-    private static final ImmutableMap<String, ChatMessageRole> ROLE_MAPPING =
-            ImmutableMap.<String, ChatMessageRole>builder()
-                    .put("user", ChatMessageRole.USER)
-                    .put("model", ChatMessageRole.ASSISTANT)
-                    .put("system", ChatMessageRole.SYSTEM)
-                    .build();
 
     private final ArkService arkService;
     private final Dispatcher dispatcher;
@@ -133,6 +128,8 @@ public final class ArkLlm extends BaseLlm implements AutoCloseable {
         // Convert ADK request to Ark request format
         ChatCompletionRequest arkRequest = toArkRequest(llmRequest);
         if (stream) {
+            arkRequest.setStreamOptions(
+                    ChatCompletionRequest.ChatCompletionRequestStreamOptions.of(true));
             log.debug(
                     "Sending streaming generateContent request to model {}", arkRequest.getModel());
             // Handle streaming response
@@ -151,70 +148,48 @@ public final class ArkLlm extends BaseLlm implements AutoCloseable {
      * @return Flowable of LlmResponse objects
      */
     private Flowable<LlmResponse> generateContentStreaming(ChatCompletionRequest arkRequest) {
-        // Get streaming response from Ark service
-        io.reactivex.Flowable<ChatCompletionChunk> streamResponse =
-                arkService.streamChatCompletion(arkRequest);
-
         return Flowable.defer(
                 () -> {
-                    // Accumulate complete text response
-                    final StringBuilder accumulatedText = new StringBuilder();
-                    // Buffer partial text for incremental responses
-                    final StringBuilder partialText = new StringBuilder();
-                    // Hold the last chunk for final processing
-                    final ChatCompletionChunk[] lastChunkHolder = {null};
-                    // Accumulate tool calls if any
-                    final List<ChatToolCall> accumulatedToolCalls = new ArrayList<>();
-
-                    return Flowable.fromPublisher(streamResponse)
+                    StringBuilder accumulatedText = new StringBuilder();
+                    StringBuilder partialText = new StringBuilder();
+                    Map<Integer, ChatToolCall> toolCalls = new TreeMap<>();
+                    Usage[] usage = {null};
+                    boolean[] finished = {false};
+                    return Flowable.fromPublisher(arkService.streamChatCompletion(arkRequest))
                             .concatMap(
                                     chunk -> {
-                                        lastChunkHolder[0] = chunk;
-                                        log.debug("Raw Ark streaming chunk: {}", chunk);
-
-                                        // Prepare list of responses to emit
-                                        List<LlmResponse> responsesToEmit = new ArrayList<>();
-                                        // Process text content from chunk
+                                        if (chunk.getUsage() != null) {
+                                            // Usage chunks carry cumulative totals, not deltas.
+                                            usage[0] = chunk.getUsage();
+                                        }
+                                        if (chunk.getChoices() == null
+                                                || chunk.getChoices().isEmpty()) {
+                                            return Flowable.<LlmResponse>empty();
+                                        }
+                                        List<LlmResponse> responses = new ArrayList<>();
                                         processTextContent(
-                                                chunk,
-                                                accumulatedText,
-                                                partialText,
-                                                responsesToEmit);
-                                        // Process tool calls from chunk
-                                        processToolCalls(chunk, accumulatedToolCalls);
-
-                                        // Handle stop chunk (final chunk)
+                                                chunk, accumulatedText, partialText, responses);
+                                        processToolCalls(chunk, toolCalls);
                                         if (isStopChunk(chunk)) {
-                                            processStopChunk(partialText, responsesToEmit);
+                                            finished[0] = true;
+                                            processStopChunk(partialText, responses);
                                         }
-
-                                        // Emit responses if any
-                                        if (responsesToEmit.isEmpty()) {
-                                            return Flowable.empty();
-                                        } else {
-                                            log.debug("Responses to emit: {}", responsesToEmit);
-                                            return Flowable.fromIterable(responsesToEmit);
-                                        }
+                                        return Flowable.fromIterable(responses);
                                     })
                             .concatWith(
                                     Flowable.defer(
                                             () -> {
-                                                // Process final response after stream ends
-                                                ChatCompletionChunk lastChunk = lastChunkHolder[0];
-                                                if (lastChunk == null
-                                                        || accumulatedText.length() == 0) {
-                                                    return Flowable.empty();
+                                                if (!finished[0]) {
+                                                    return Flowable.error(
+                                                            new IllegalStateException(
+                                                                    "Ark stream ended without a"
+                                                                            + " finish reason."));
                                                 }
-
-                                                if (isStopChunk(lastChunk)) {
-                                                    // Build and emit final aggregated response
-                                                    return Flowable.just(
-                                                            buildFinalResponse(
-                                                                    accumulatedText.toString(),
-                                                                    accumulatedToolCalls));
-                                                }
-
-                                                return Flowable.empty();
+                                                return Flowable.just(
+                                                        buildFinalResponse(
+                                                                accumulatedText.toString(),
+                                                                new ArrayList<>(toolCalls.values()),
+                                                                usage[0]));
                                             }));
                 });
     }
@@ -232,7 +207,8 @@ public final class ArkLlm extends BaseLlm implements AutoCloseable {
             StringBuilder partialText,
             List<LlmResponse> responsesToEmit) {
         // Extract text content from chunk
-        String content = (String) chunk.getChoices().get(0).getMessage().getContent();
+        ChatMessage message = chunk.getChoices().get(0).getMessage();
+        String content = message == null ? null : (String) message.getContent();
 
         if (StringUtils.isNotEmpty(content)) {
             // Add to accumulated text
@@ -265,21 +241,36 @@ public final class ArkLlm extends BaseLlm implements AutoCloseable {
      * @param accumulatedToolCalls List of accumulated tool calls
      */
     private void processToolCalls(
-            ChatCompletionChunk chunk, List<ChatToolCall> accumulatedToolCalls) {
-        // Extract tool calls from chunk
-        List<ChatToolCall> toolCalls = chunk.getChoices().get(0).getMessage().getToolCalls();
-        if (null != toolCalls && !toolCalls.isEmpty()) {
-            ChatToolCall toolCall = toolCalls.get(0);
-            // If tool call has ID, it's a new tool call
-            if (StringUtils.isNotBlank(toolCall.getId())) {
-                accumulatedToolCalls.add(toolCall);
-            } else {
-                // Otherwise, it's continuation of existing tool call
-                int index = toolCall.getIndex();
-                String arguments =
-                        accumulatedToolCalls.get(index).getFunction().getArguments()
-                                + toolCall.getFunction().getArguments();
-                accumulatedToolCalls.get(index).getFunction().setArguments(arguments);
+            ChatCompletionChunk chunk, Map<Integer, ChatToolCall> accumulatedToolCalls) {
+        ChatMessage message = chunk.getChoices().get(0).getMessage();
+        if (message == null || message.getToolCalls() == null) {
+            return;
+        }
+        List<ChatToolCall> deltas = message.getToolCalls();
+        for (int position = 0; position < deltas.size(); position++) {
+            ChatToolCall delta = deltas.get(position);
+            int index = delta.getIndex() == null ? position : delta.getIndex();
+            ChatToolCall call =
+                    accumulatedToolCalls.computeIfAbsent(
+                            index,
+                            ignored ->
+                                    new ChatToolCall(
+                                            null, "function", new ChatFunctionCall("", "")));
+            if (StringUtils.isNotBlank(delta.getId())) {
+                if (call.getId() != null && !call.getId().equals(delta.getId())) {
+                    throw new IllegalArgumentException(
+                            "Conflicting Ark tool call IDs for index " + index);
+                }
+                call.setId(delta.getId());
+            }
+            if (delta.getFunction() != null) {
+                ChatFunctionCall function = call.getFunction();
+                function.setName(
+                        function.getName()
+                                + StringUtils.defaultString(delta.getFunction().getName()));
+                function.setArguments(
+                        function.getArguments()
+                                + StringUtils.defaultString(delta.getFunction().getArguments()));
             }
         }
     }
@@ -304,10 +295,12 @@ public final class ArkLlm extends BaseLlm implements AutoCloseable {
      * @return Final LlmResponse object
      */
     private LlmResponse buildFinalResponse(
-            String accumulatedText, List<ChatToolCall> accumulatedToolCalls) {
+            String accumulatedText, List<ChatToolCall> accumulatedToolCalls, Usage usage) {
         List<Part> parts = new ArrayList<>();
         // Add text part
-        parts.add(Part.fromText(accumulatedText));
+        if (!accumulatedText.isEmpty()) {
+            parts.add(Part.fromText(accumulatedText));
+        }
 
         // Add tool call parts if any
         if (!accumulatedToolCalls.isEmpty()) {
@@ -320,6 +313,7 @@ public final class ArkLlm extends BaseLlm implements AutoCloseable {
                         .content(Content.builder().role("model").parts(parts).build())
                         .partial(false) // Mark as complete response
                         .build();
+        finalAggregatedResponse = withUsage(finalAggregatedResponse, usage);
         log.debug("finalAggregatedResponse to emit: {}", finalAggregatedResponse);
         return finalAggregatedResponse;
     }
@@ -376,8 +370,22 @@ public final class ArkLlm extends BaseLlm implements AutoCloseable {
                             .build();
         }
 
+        response = withUsage(response, arkResponse.getUsage());
         log.debug("LlmResponse:{}", response);
         return response;
+    }
+
+    private LlmResponse withUsage(LlmResponse response, Usage usage) {
+        if (usage == null) {
+            return response;
+        }
+        GenerateContentResponseUsageMetadata metadata =
+                GenerateContentResponseUsageMetadata.builder()
+                        .promptTokenCount(Math.toIntExact(usage.getPromptTokens()))
+                        .candidatesTokenCount(Math.toIntExact(usage.getCompletionTokens()))
+                        .totalTokenCount(Math.toIntExact(usage.getTotalTokens()))
+                        .build();
+        return response.toBuilder().usageMetadata(metadata).build();
     }
 
     /**
@@ -398,6 +406,20 @@ public final class ArkLlm extends BaseLlm implements AutoCloseable {
                         .model(effectiveModelName)
                         .messages(messages)
                         .build();
+
+        llmRequest
+                .config()
+                .ifPresent(
+                        generation -> {
+                            generation
+                                    .temperature()
+                                    .ifPresent(
+                                            value -> request.setTemperature(value.doubleValue()));
+                            generation
+                                    .topP()
+                                    .ifPresent(value -> request.setTopP(value.doubleValue()));
+                            generation.maxOutputTokens().ifPresent(request::setMaxTokens);
+                        });
 
         // Add thinking parameter if set
         if (null != thinking) {
@@ -451,13 +473,7 @@ public final class ArkLlm extends BaseLlm implements AutoCloseable {
      * @return Stream of ChatMessage objects with user/model roles
      */
     private Stream<ChatMessage> buildContentMessages(LlmRequest llmRequest) {
-        return llmRequest.contents().stream()
-                .map(
-                        content ->
-                                ChatMessage.builder()
-                                        .role(toArkRole(content.role().orElse("user")))
-                                        .content(extractText(content))
-                                        .build());
+        return new ArkChatHistoryMapper().map(llmRequest.contents()).stream();
     }
 
     /**
@@ -536,83 +552,28 @@ public final class ArkLlm extends BaseLlm implements AutoCloseable {
         }
     }
 
-    /**
-     * Extract text content from Content object
-     * @param content The Content object
-     * @return Extracted text
-     */
-    private String extractText(Content content) {
-        StringBuilder textBuilder = new StringBuilder();
-        // Use ifPresent with a lambda for a more functional and readable style
-        content.parts()
-                .ifPresent(
-                        parts -> {
-                            for (Part part : parts) {
-                                if (part == null) {
-                                    continue;
-                                }
-                                // Append text part
-                                appendTextPart(part, textBuilder);
-                                // Append function response part
-                                appendFunctionResponsePart(part, textBuilder);
-                            }
-                        });
-        return textBuilder.toString();
-    }
-
-    /**
-     * Append text part to StringBuilder
-     * @param part The Part object
-     * @param textBuilder The StringBuilder to append to
-     */
-    private void appendTextPart(Part part, StringBuilder textBuilder) {
-        // Append the text part directly to the main StringBuilder
-        part.text().ifPresent(textBuilder::append);
-    }
-
-    /**
-     * Append function response part to StringBuilder
-     * @param part The Part object
-     * @param textBuilder The StringBuilder to append to
-     */
-    private void appendFunctionResponsePart(Part part, StringBuilder textBuilder) {
-        // Chain flatMap and ifPresent for safe, nested Optional handling
-        part.functionResponse()
-                .flatMap(FunctionResponse::response) // Safely get the inner Optional<Map>
-                .ifPresent( // Execute only if the map is present
-                        responseMap -> {
-                            // Append the serialized JSON directly
-                            textBuilder.append(JSONUtil.toJson(responseMap));
-                        });
-    }
-
-    /**
-     * Convert ADK role to Ark role
-     * @param adkRole The ADK role string
-     * @return Corresponding ChatMessageRole
-     */
-    private ChatMessageRole toArkRole(String adkRole) {
-        ChatMessageRole role = ROLE_MAPPING.get(adkRole);
-        if (role != null) {
-            return role;
-        }
-
-        // TODO: need to handle tool calling in the future
-        return ChatMessageRole.USER;
-    }
-
-    /**
-     * Parse a single tool call into a Part
-     * @param toolCall The ChatToolCall object
-     * @return Part representing the function call
-     * @throws JsonProcessingException If JSON parsing fails
-     */
     private Part parseToolCallPart(ChatToolCall toolCall) throws JsonProcessingException {
-        return Part.fromFunctionCall(
-                toolCall.getFunction().getName(),
+        if (StringUtils.isBlank(toolCall.getId())
+                || toolCall.getFunction() == null
+                || StringUtils.isBlank(toolCall.getFunction().getName())) {
+            throw new IllegalArgumentException(
+                    "Ark tool call must include an ID and function name.");
+        }
+        Map<String, Object> arguments =
                 JSONUtil.fromJson(
-                        toolCall.getFunction().getArguments(),
-                        new TypeReference<Map<String, Object>>() {}));
+                        StringUtils.defaultIfBlank(toolCall.getFunction().getArguments(), "{}"),
+                        new TypeReference<Map<String, Object>>() {});
+        if (arguments == null) {
+            throw new IllegalArgumentException("Ark tool arguments must be a JSON object.");
+        }
+        return Part.builder()
+                .functionCall(
+                        FunctionCall.builder()
+                                .id(toolCall.getId())
+                                .name(toolCall.getFunction().getName())
+                                .args(arguments)
+                                .build())
+                .build();
     }
 
     /**
@@ -627,7 +588,8 @@ public final class ArkLlm extends BaseLlm implements AutoCloseable {
                     try {
                         parts.add(parseToolCallPart(toolCall));
                     } catch (JsonProcessingException e) {
-                        log.error("read function arguments error", e);
+                        throw new IllegalArgumentException(
+                                "Invalid JSON arguments in Ark tool call.", e);
                     }
                 });
         return parts;
