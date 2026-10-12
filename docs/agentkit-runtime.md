@@ -54,7 +54,7 @@ docker run --rm -p 127.0.0.1:8000:8000 \
 The image runs as UID/GID `10001` and exposes port `8000`. The build does not
 embed model credentials. Supply environment variables when starting the container.
 
-## Invoke with the official AgentKit CLI
+## Invoke with the Python AgentKit CLI
 
 With `agentkit-sdk-python==0.8.5` installed and the Java example running locally:
 
@@ -68,19 +68,20 @@ above is a placeholder for this local example, which does not implement
 HTTP authentication. For a deployed runtime, use the gateway's actual
 credentials and secret-management mechanism.
 
-## AgentKit CLI compatibility boundary
+## AgentKit CLI integration
 
-The official CLI comes from
-[`volcengine/agentkit-sdk-python`](https://github.com/volcengine/agentkit-sdk-python).
-In version `0.8.5`, `agentkit init` and the local/cloud builders support Python
-and Golang. Setting `language: Java` fails with `Unsupported language: Java`,
-including when a custom Dockerfile exists. This example does not add Java to
-that CLI and does not claim that `agentkit launch` can build this project.
+The TypeScript AgentKit CLI used for Java project delivery lives in
+[`iaasng/agentkit-cli`](https://code.byted.org/iaasng/agentkit-cli). Its Java
+lifecycle integration provides the `basic_java` template and Maven container
+builds. Use a CLI build that includes that template; check `agentkit init --list-templates`.
+The template is maintained in the CLI repository, while this SDK example
+provides the runtime HTTP contract.
 
-The HTTP contract follows `agentkit/apps/simple_app/simple_app.py` and
-`simple_app_handlers.py`; the local runner uses port `8000` and `/invoke` for
-Basic App applications. Native CLI scaffolding and builds require changes in
-the official CLI repository. Cloud deployment of this image has not been verified.
+The Python `agentkit-sdk-python==0.8.5` CLI is a separate reference. Its
+`init`/builders only support Python and Golang, but its direct `invoke` command
+can call this Java service, as shown above. The HTTP contract follows
+`agentkit/apps/simple_app/simple_app.py` and `simple_app_handlers.py`.
+Cloud deployment of this SDK example has not been verified.
 
 ## Test
 
@@ -107,7 +108,10 @@ routing, method checks and error redaction. They do not call a paid model.
 认证、持久会话、SSE 和 Runtime Identity 需要业务应用另行接入。
 本机默认只监听 `127.0.0.1`，容器监听 `0.0.0.0`，需由平台网关提供访问控制。
 
-官方 AgentKit CLI 归属 `agentkit-sdk-python` 仓库。`0.8.5` 版本的初始化、
-本地构建和云构建只支持 Python/Golang；即使提供自定义 Dockerfile，
-`language: Java` 仍会在构建前被拒绝。此示例已提供 Java 应用的运行端适配，
-CLI 原生 Java 脚手架与构建需要在官方 CLI 仓库继续补齐；云端部署尚未验证。
+Java 项目交付使用的 TypeScript CLI 位于 `iaasng/agentkit-cli` 仓库。
+其 Java 生命周期适配提供 `basic_java` 模板和 Maven 容器构建；需要使用包含
+该模板的 CLI 版本。SDK 仓库保留 Runtime HTTP 示例，脚手架在 CLI 仓库维护。
+
+Python `agentkit-sdk-python==0.8.5` CLI 是单独的协议参照，其初始化和构建仍仅
+支持 Python/Golang，但可通过直接 `invoke` 调用 Java HTTP 服务。
+云端部署尚未验证。
