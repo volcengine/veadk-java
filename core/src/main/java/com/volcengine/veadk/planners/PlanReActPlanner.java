@@ -1,0 +1,80 @@
+/**
+ * Copyright (c) 2025 Beijing Volcano Engine Technology Co., Ltd. and/or its affiliates.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.volcengine.veadk.planners;
+
+import com.google.adk.models.LlmRequest;
+import com.google.adk.models.LlmResponse;
+import com.google.genai.types.Part;
+import java.util.ArrayList;
+import java.util.List;
+
+/** Prompt-based plan, tool action, and final answer separation; no native thinking support required. */
+public final class PlanReActPlanner implements Planner {
+    public static final String FINAL_ANSWER_TAG = "/*FINAL_ANSWER*/";
+    private static final List<String> THOUGHT_TAGS =
+            List.of("/*PLANNING*/", "/*REPLANNING*/", "/*REASONING*/", "/*ACTION*/");
+
+    @Override
+    public String buildPlanningInstruction(LlmRequest request) {
+        return """
+        First provide a concise numbered plan under /*PLANNING*/ using only available tools.
+        Execute actions with actual function calls, preserving the declared tool arguments.
+        Summarize observations briefly under /*REASONING*/ and actions under /*ACTION*/.
+        If observations require a revised plan, place it under /*REPLANNING*/.
+        Do not invent tools or retry a failed tool automatically.
+        Return the final user-facing answer under /*FINAL_ANSWER*/.
+        If the available information is insufficient, explain what information is needed.
+        """;
+    }
+
+    @Override
+    public LlmResponse processPlanningResponse(LlmResponse response) {
+        if (response.content().isEmpty()) {
+            return response;
+        }
+        List<Part> parts = new ArrayList<>();
+        for (Part part : response.content().orElseThrow().parts().orElse(List.of())) {
+            if (part.text().isEmpty()) {
+                parts.add(part);
+                continue;
+            }
+            String text = part.text().orElseThrow();
+            if (response.partial().orElse(false)) {
+                // Tags can straddle stream chunks. Only the complete final response is split.
+                parts.add(part.toBuilder().thought(true).build());
+                continue;
+            }
+            int split = text.lastIndexOf(FINAL_ANSWER_TAG);
+            if (split >= 0) {
+                String thought = text.substring(0, split);
+                String answer = text.substring(split + FINAL_ANSWER_TAG.length());
+                if (!thought.isEmpty()) {
+                    parts.add(part.toBuilder().text(thought).thought(true).build());
+                }
+                if (!answer.isEmpty()) {
+                    parts.add(part.toBuilder().text(answer).thought(false).build());
+                }
+            } else if (THOUGHT_TAGS.stream().anyMatch(text.stripLeading()::startsWith)) {
+                parts.add(part.toBuilder().thought(true).build());
+            } else {
+                parts.add(part);
+            }
+        }
+        return response.toBuilder()
+                .content(response.content().orElseThrow().toBuilder().parts(parts).build())
+                .build();
+    }
+}

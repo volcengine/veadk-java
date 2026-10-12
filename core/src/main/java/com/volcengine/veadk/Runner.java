@@ -235,6 +235,7 @@ public class Runner extends com.google.adk.runner.Runner {
     private static String textFromEvent(Event event) {
         return event.content().flatMap(Content::parts).stream()
                 .flatMap(List::stream)
+                .filter(part -> !part.thought().orElse(false))
                 .map(part -> part.text().orElse(""))
                 .collect(Collectors.joining());
     }
