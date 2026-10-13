@@ -25,8 +25,15 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.google.adk.agents.BaseAgent;
 import com.google.adk.agents.InvocationContext;
 import com.google.adk.events.Event;
+import com.google.adk.models.BaseLlm;
+import com.google.adk.models.BaseLlmConnection;
+import com.google.adk.models.LlmRequest;
+import com.google.adk.models.LlmResponse;
 import com.google.genai.types.Content;
 import com.google.genai.types.Part;
+import com.volcengine.veadk.Agent;
+import com.volcengine.veadk.memory.ShortTermMemory;
+import io.reactivex.rxjava3.core.Completable;
 import io.reactivex.rxjava3.core.Flowable;
 import io.reactivex.rxjava3.schedulers.Schedulers;
 import java.io.BufferedReader;
@@ -42,6 +49,7 @@ import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import org.junit.jupiter.api.Test;
 
@@ -88,6 +96,17 @@ public class AgentKitParityTest {
 
     public static class NullRoot {
         public static final BaseAgent ROOT_AGENT = null;
+    }
+
+    public static class ClosingRoot {
+        static final AtomicInteger closes = new AtomicInteger();
+        public static final BaseAgent ROOT_AGENT =
+                new TestAgent(c -> Flowable.empty()) {
+                    @Override
+                    public Completable close() {
+                        return Completable.fromAction(closes::incrementAndGet);
+                    }
+                };
     }
 
     private AgentKitRuntimeExample app(BaseAgent agent, boolean streaming) throws Exception {
@@ -232,22 +251,23 @@ public class AgentKitParityTest {
 
     @Test
     void configuresAllSelectedToolsAndMetadata() throws Exception {
-        var process =
-                new ProcessBuilder(
-                        System.getProperty("java.home") + "/bin/java",
-                        "-cp",
-                        System.getProperty("java.class.path"),
-                        AgentKitParityTest.class.getName());
+        var process = AgentKitTestJvm.process(AgentKitParityTest.class);
         process.environment().put("VOLCENGINE_ACCESS_KEY", "test-access-key");
         process.environment().put("VOLCENGINE_SECRET_KEY", "test-secret-key");
         var child = process.redirectErrorStream(true).start();
-        assertTrue(child.waitFor(15, TimeUnit.SECONDS));
-        assertEquals(
-                0,
-                child.exitValue(),
-                new String(
-                        child.getInputStream().readAllBytes(),
-                        java.nio.charset.StandardCharsets.UTF_8));
+        try {
+            assertTrue(child.waitFor(15, TimeUnit.SECONDS));
+            assertEquals(
+                    0,
+                    child.exitValue(),
+                    new String(
+                            child.getInputStream().readAllBytes(),
+                            java.nio.charset.StandardCharsets.UTF_8));
+        } finally {
+            child.destroy();
+            if (!child.waitFor(5, TimeUnit.SECONDS))
+                child.destroyForcibly().waitFor(5, TimeUnit.SECONDS);
+        }
     }
 
     public static void main(String[] args) {
@@ -350,6 +370,105 @@ public class AgentKitParityTest {
             assertEquals(200, retried.statusCode());
             assertEquals("\"recovered\"", retried.body());
         }
+    }
+
+    @Test
+    void sessionInitializationFailureIsRedactedAndDoesNotReserveTheSession() throws Exception {
+        var calls = new AtomicInteger();
+        var memory =
+                ShortTermMemory.builder()
+                        .local()
+                        .afterCreateSessionCallback(
+                                session -> {
+                                    throw new IllegalStateException("private-session-backend");
+                                })
+                        .build();
+        var model =
+                new BaseLlm("test-model") {
+                    @Override
+                    public Flowable<LlmResponse> generateContent(
+                            LlmRequest request, boolean streaming) {
+                        calls.incrementAndGet();
+                        return Flowable.just(
+                                LlmResponse.builder()
+                                        .content(
+                                                Content.builder()
+                                                        .role("model")
+                                                        .parts(Part.fromText("recovered"))
+                                                        .build())
+                                        .build());
+                    }
+
+                    @Override
+                    public BaseLlmConnection connect(LlmRequest request) {
+                        throw new UnsupportedOperationException();
+                    }
+                };
+        var agent = Agent.builder().name("test_agent").model(model).shortTermMemory(memory).build();
+        try (var app = app(agent, false)) {
+            var failed = send(app, "alice", "init_failure");
+            assertEquals(500, failed.statusCode());
+            assertTrue(failed.body().contains("Could not initialize session"));
+            assertFalse(failed.body().contains("private-session-backend"));
+            assertEquals(0, calls.get());
+            // The backend created the session before its hook failed. Retrying must
+            // reuse that session and be allowed to call the model.
+            var retry = send(app, "alice", "init_failure");
+            assertEquals(200, retry.statusCode());
+            assertEquals("\"recovered\"", retry.body());
+            assertEquals(1, calls.get());
+        } finally {
+            agent.close().blockingAwait();
+        }
+    }
+
+    @Test
+    void builtInDefaultsAndInvalidAgentConfiguration() {
+        try (var config =
+                AgentKitAgentConfiguration.fromEnvironment(
+                        Map.of(
+                                "MODEL_AGENT_NAME",
+                                "test-model",
+                                "MODEL_AGENT_API_KEY",
+                                "test-key",
+                                "AGENTKIT_AGENT_CLASS",
+                                " ",
+                                "AGENTKIT_TOOLS",
+                                ", ,"))) {
+            var agent = (com.google.adk.agents.LlmAgent) config.agent();
+            assertEquals("agentkit_java", agent.name());
+            assertEquals("An AgentKit Java agent.", agent.description());
+            assertEquals(
+                    "Answer the user's question concisely.",
+                    ((com.google.adk.agents.Instruction.Static) agent.instruction()).instruction());
+            assertTrue(agent.tools().blockingGet().isEmpty());
+            assertEquals("test-model", agent.resolvedModel().model().orElseThrow().model());
+        }
+        assertThrows(
+                IllegalArgumentException.class,
+                () ->
+                        AgentKitAgentConfiguration.fromEnvironment(
+                                Map.of(
+                                        "MODEL_AGENT_NAME",
+                                        "test-model",
+                                        "MODEL_AGENT_API_KEY",
+                                        "test-key",
+                                        "AGENT_NAME",
+                                        "invalid/name")));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> AgentKitAgentConfiguration.fromEnvironment(Map.of("MODEL_AGENT_NAME", " ")));
+    }
+
+    @Test
+    void closesImportedAgentOnlyOnce() {
+        var config =
+                AgentKitAgentConfiguration.fromEnvironment(
+                        Map.of("AGENTKIT_AGENT_CLASS", ClosingRoot.class.getName()));
+        int before = ClosingRoot.closes.get();
+        config.close();
+        config.close();
+        assertEquals(before + 1, ClosingRoot.closes.get());
     }
 
     @Test
