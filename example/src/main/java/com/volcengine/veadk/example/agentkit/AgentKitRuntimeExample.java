@@ -28,6 +28,10 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.SynchronousQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 
 /** Minimal stateless JSON application implementing AgentKit Simple App HTTP routes. */
@@ -36,6 +40,8 @@ public final class AgentKitRuntimeExample implements AutoCloseable {
     private static final ObjectMapper JSON = new ObjectMapper();
     private final HttpServer server;
     private final ExecutorService executor = Executors.newFixedThreadPool(4);
+    private final ExecutorService invocations =
+            new ThreadPoolExecutor(4, 4, 0L, TimeUnit.MILLISECONDS, new SynchronousQueue<>());
     private final Function<String, String> invoke;
 
     public AgentKitRuntimeExample(InetSocketAddress address, Function<String, String> invoke)
@@ -55,6 +61,28 @@ public final class AgentKitRuntimeExample implements AutoCloseable {
     }
 
     private void handle(HttpExchange exchange) throws IOException {
+        if (exchange.getRequestURI().getPath().equals("/invoke")
+                && exchange.getRequestMethod().equals("POST")) {
+            try {
+                // The worker owns the exchange, including reading its body and closing it.
+                invocations.execute(
+                        () -> {
+                            try {
+                                handleInvocation(exchange);
+                            } catch (IOException failure) {
+                                System.getLogger(AgentKitRuntimeExample.class.getName())
+                                        .log(
+                                                System.Logger.Level.WARNING,
+                                                "Failed to complete HTTP invocation");
+                            }
+                        });
+            } catch (RejectedExecutionException overloaded) {
+                try (exchange) {
+                    error(exchange, 503, "ServiceUnavailable", "All invocation workers are busy");
+                }
+            }
+            return;
+        }
         try (exchange) {
             String path = exchange.getRequestURI().getPath();
             if (path.equals("/ping")
@@ -70,6 +98,11 @@ public final class AgentKitRuntimeExample implements AutoCloseable {
                 return;
             }
             if (!requireMethod(exchange, "POST")) return;
+        }
+    }
+
+    private void handleInvocation(HttpExchange exchange) throws IOException {
+        try (exchange) {
             byte[] bytes = exchange.getRequestBody().readNBytes(MAX_REQUEST_BYTES + 1);
             if (bytes.length > MAX_REQUEST_BYTES) {
                 error(exchange, 413, "PayloadTooLarge", "Request exceeds 1 MiB");
@@ -138,6 +171,7 @@ public final class AgentKitRuntimeExample implements AutoCloseable {
     public void close() {
         server.stop(1);
         executor.shutdownNow();
+        invocations.shutdownNow();
     }
 
     public static void main(String[] args) throws IOException {

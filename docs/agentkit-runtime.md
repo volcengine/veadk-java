@@ -8,6 +8,11 @@ fresh in-memory session. Authentication, persistent sessions, SSE, runtime
 identity and platform deployment are outside this example. Local execution binds
 to `127.0.0.1`; a container binds to `0.0.0.0` behind the platform gateway.
 
+Invocation processing uses a separate pool of four workers. When all four are busy,
+additional `POST /invoke` requests receive `503 ServiceUnavailable` without calling
+the model. Health routes remain responsive while model calls are in progress.
+Retry an overloaded request after an in-flight invocation finishes.
+
 ## Run locally
 
 From the repository root:

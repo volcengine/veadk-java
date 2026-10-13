@@ -25,6 +25,11 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -58,6 +63,7 @@ class AgentKitRuntimeExampleTest {
     private HttpResponse<String> request(String method, String path, String body) throws Exception {
         return client.send(
                 HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + app.port() + path))
+                        .timeout(Duration.ofSeconds(2))
                         .header("Content-Type", "application/json")
                         .method(method, HttpRequest.BodyPublishers.ofString(body))
                         .build(),
@@ -130,5 +136,107 @@ class AgentKitRuntimeExampleTest {
         assertEquals(500, response.statusCode());
         assertEquals("InvocationError", json.readTree(response.body()).at("/error/type").asText());
         assertFalse(response.body().contains("private-credential"));
+        assertEquals(200, request("POST", "/invoke", "{\"prompt\":\"recovered\"}").statusCode());
+    }
+
+    @Test
+    void healthChecksAndOverloadResponseRemainAvailableDuringSlowInvocations() throws Exception {
+        app.close();
+        var entered = new CountDownLatch(4);
+        var release = new CountDownLatch(1);
+        app =
+                new AgentKitRuntimeExample(
+                        new InetSocketAddress("127.0.0.1", 0),
+                        prompt -> {
+                            calls.incrementAndGet();
+                            entered.countDown();
+                            try {
+                                if (!release.await(15, TimeUnit.SECONDS))
+                                    throw new IllegalStateException(
+                                            "Timed out waiting for release");
+                            } catch (InterruptedException e) {
+                                Thread.currentThread().interrupt();
+                                throw new IllegalStateException("Interrupted", e);
+                            }
+                            return "Answer: " + prompt;
+                        });
+        app.start();
+        var pending = new ArrayList<CompletableFuture<HttpResponse<String>>>();
+        try {
+            for (int i = 0; i < 4; i++) {
+                pending.add(
+                        client.sendAsync(
+                                HttpRequest.newBuilder(
+                                                URI.create(
+                                                        "http://127.0.0.1:"
+                                                                + app.port()
+                                                                + "/invoke"))
+                                        .timeout(Duration.ofSeconds(15))
+                                        .POST(
+                                                HttpRequest.BodyPublishers.ofString(
+                                                        "{\"prompt\":\"slow\"}"))
+                                        .build(),
+                                HttpResponse.BodyHandlers.ofString()));
+            }
+            assertTrue(entered.await(5, TimeUnit.SECONDS), "All four invocations must be running");
+            for (String path : new String[] {"/ping", "/health", "/readiness", "/liveness"}) {
+                assertEquals(200, request("GET", path, "").statusCode(), path);
+            }
+            var overloaded = request("POST", "/invoke", "{\"prompt\":\"excess\"}");
+            assertEquals(503, overloaded.statusCode());
+            assertEquals(
+                    "ServiceUnavailable",
+                    json.readTree(overloaded.body()).at("/error/type").asText());
+            assertEquals(4, calls.get(), "An overloaded request must not invoke the model");
+        } finally {
+            release.countDown();
+            CompletableFuture.allOf(pending.toArray(CompletableFuture[]::new))
+                    .get(5, TimeUnit.SECONDS);
+        }
+        for (var response : pending) {
+            assertEquals(200, response.get().statusCode());
+            assertEquals("Answer: slow", json.readTree(response.get().body()).asText());
+        }
+        assertEquals(200, request("POST", "/invoke", "{\"prompt\":\"recovered\"}").statusCode());
+        assertEquals(5, calls.get());
+    }
+
+    @Test
+    void closeInterruptsActiveInvocations() throws Exception {
+        app.close();
+        var entered = new CountDownLatch(1);
+        var interrupted = new CountDownLatch(1);
+        app =
+                new AgentKitRuntimeExample(
+                        new InetSocketAddress("127.0.0.1", 0),
+                        prompt -> {
+                            entered.countDown();
+                            try {
+                                new CountDownLatch(1).await();
+                                throw new AssertionError("Invocation unexpectedly released");
+                            } catch (InterruptedException e) {
+                                interrupted.countDown();
+                                Thread.currentThread().interrupt();
+                                throw new IllegalStateException("Interrupted", e);
+                            }
+                        });
+        app.start();
+        var pending =
+                client.sendAsync(
+                        HttpRequest.newBuilder(
+                                        URI.create("http://127.0.0.1:" + app.port() + "/invoke"))
+                                .timeout(Duration.ofSeconds(5))
+                                .POST(HttpRequest.BodyPublishers.ofString("{\"prompt\":\"slow\"}"))
+                                .build(),
+                        HttpResponse.BodyHandlers.ofString());
+        try {
+            assertTrue(entered.await(3, TimeUnit.SECONDS));
+            app.close();
+            assertTrue(
+                    interrupted.await(2, TimeUnit.SECONDS),
+                    "Shutdown must interrupt model workers");
+        } finally {
+            pending.cancel(true);
+        }
     }
 }
