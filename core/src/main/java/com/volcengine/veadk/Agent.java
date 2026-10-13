@@ -40,8 +40,6 @@ import com.volcengine.veadk.model.FallbackLlm;
 import com.volcengine.veadk.model.ModelProvider;
 import com.volcengine.veadk.model.OpenAiCompatibleLlm;
 import com.volcengine.veadk.model.OpenAiCompatibleLlmConfig;
-import com.volcengine.veadk.model.PlanningLlm;
-import com.volcengine.veadk.planners.Planner;
 import com.volcengine.veadk.skills.CompositeSkillSource;
 import com.volcengine.veadk.skills.SingleSkillDirectorySource;
 import com.volcengine.veadk.tools.builtin.knowledgebase.LoadKnowledgebaseTool;
@@ -161,7 +159,6 @@ public final class Agent extends LlmAgent {
         private boolean explicitModelConfigured;
         private BaseLlm explicitModel;
         private List<BaseLlm> modelFallbacks = List.of();
-        private Planner planner;
         private ModelProvider modelProvider;
         private String modelApiKey;
         private String modelApiBase;
@@ -187,12 +184,6 @@ public final class Agent extends LlmAgent {
 
         public Builder modelFallbacks(List<? extends BaseLlm> fallbacks) {
             this.modelFallbacks = List.copyOf(fallbacks);
-            return this;
-        }
-
-        /** Installs a VeADK planner without replacing ADK's Agent/Runner execution path. */
-        public Builder planner(Planner planner) {
-            this.planner = Objects.requireNonNull(planner, "planner must be set.");
             return this;
         }
 
@@ -596,7 +587,7 @@ public final class Agent extends LlmAgent {
 
         private void configureModel() {
             if (explicitModelConfigured) {
-                super.model(decorateModel(explicitModel));
+                super.model(withFallbacks(explicitModel));
                 return;
             }
             ResolvedModel resolvedModel = resolveModel(modelProvider, veadkModelName);
@@ -619,13 +610,11 @@ public final class Agent extends LlmAgent {
                                                 .baseUrl(modelApiBase)
                                                 .build());
                     };
-            super.model(decorateModel(primary));
+            super.model(withFallbacks(primary));
         }
 
-        private BaseLlm decorateModel(BaseLlm primary) {
-            BaseLlm model =
-                    modelFallbacks.isEmpty() ? primary : new FallbackLlm(primary, modelFallbacks);
-            return planner == null ? model : new PlanningLlm(model, planner);
+        private BaseLlm withFallbacks(BaseLlm primary) {
+            return modelFallbacks.isEmpty() ? primary : new FallbackLlm(primary, modelFallbacks);
         }
 
         private static ResolvedModel resolveModel(
