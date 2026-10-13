@@ -16,6 +16,7 @@ updated_at: "2026-10-13"
 - [ ] 1.3 扩展 `VikingKnowledgebaseConfig`，新增 `apiKey` 字段、getter 和 builder；保留现有构造器并保证源码/二进制兼容。
 - [ ] 1.4 调整 `VikingKnowledgebaseConfig.fromEnv()`，支持 API-key-only，不因 AK/SK 缺失在构造配置阶段提前失败。
 - [ ] 1.5 在 `KnowledgeBase.Builder` 增加 `vikingApiKey(String)` 或等价入口，仅传递给 Viking backend，并补 `KnowledgeBaseTest` 验证显式配置优先于环境变量。
+- [ ] 1.6 在 `VikingMemoryService` 新增用户可调用的 public 显式 API key 构造入口 `VikingMemoryService(String appName, String apiKey)`；旧一参构造器委托同一解析逻辑并按显式 `null` 触发环境变量回退，内部/package-private 注入只能作为测试或实现细节。
 
 ## 2. T2 KnowledgeBase API key 数据面
 
@@ -33,10 +34,10 @@ updated_at: "2026-10-13"
 - [ ] 3.2 在 `VikingMemoryWrapper` 新增可注入 HTTP transport/client，复用 KnowledgeBase helper 风格或抽出仅限 integration 包内的最小工具。
 - [ ] 3.3 修改 `searchMemory`：有效 API key 存在时向 `/api/memory/search` 发送 Bearer POST；未配置时保持 AK/SK `json(...)`。
 - [ ] 3.4 修改 `addSession`：有效 API key 存在时向 `/api/memory/session/add` 发送 Bearer POST；无 API key 时保持 AK/SK `json(...)`。
-- [ ] 3.5 在 `VikingMemoryService` 默认构造器读取 `EnvUtil.getVikingMemoryApiKey()`，并提供显式 API key 构造入口或内部 config 注入入口。
+- [ ] 3.5 在 `VikingMemoryService` 实现 public 显式 API key 入口：`new VikingMemoryService(appName, explicitApiKey)` 中清洗后的有效显式值必须优先于 `DATABASE_VIKINGMEM_API_KEY`，显式空白、`None`、`null` 或 Java `null` 才回退环境变量。
 - [ ] 3.6 当有效 API key 存在且 AK/SK 不完整时，`VikingMemoryService` 构造阶段跳过 collection precheck/create；AK/SK 可用时保留现有管理面行为。
 - [ ] 3.7 补 `VikingMemoryWrapperTest`，覆盖 search/add 的 Bearer 请求、失败空结果/false、AK/SK 兼容分支和非敏感失败。
-- [ ] 3.8 补 `VikingMemoryServiceTest`，覆盖 API-key-only 初始化跳过管理面、空 user message 不调用 addSession、search response shape 保持。
+- [ ] 3.8 补 `VikingMemoryServiceTest`，覆盖 public 显式 API key 构造入口优先于环境变量、空显式值回退 `DATABASE_VIKINGMEM_API_KEY`、API-key-only 初始化跳过管理面、空 user message 不调用 addSession、search response shape 保持。
 
 ## 4. T4 文档与边界说明
 

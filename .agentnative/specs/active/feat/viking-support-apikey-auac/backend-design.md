@@ -19,6 +19,7 @@ updated_at: "2026-10-13"
 | 需求澄清 | `artifacts/AI-Context Collect/需求澄清/需求澄清` | 明确数据面支持 API key，环境变量为 `DATABASE_VIKING_API_KEY` / `DATABASE_VIKINGMEM_API_KEY`，显式参数优先于环境变量。 |
 | Spec | `artifacts/AI+Human-Spec设计/spec-r1-a1/prd-spec.md` | REQ-001 至 REQ-007 均为当前设计来源。 |
 | Spec Review | `artifacts/Spec Review/spec-review-r1-a1/result.yaml` | `PASS` / `NONE`，无阻塞 finding。 |
+| 后端设计 Review 返修 | `artifacts/后端设计Review/backend-design-review-r1-a1/result.yaml` | P1 `BDR-001` 要求 Viking Memory 显式 API key 必须提供用户可调用的 public 配置入口，内部/package-private 注入只能作为测试或实现细节。 |
 | 仓库清单 | `repos/manifest.yaml` | 当前组件仓为 `repos/volcengine_veadk-java`，分支 `feat/viking-support-apikey-auac`。 |
 | 仓库约定 | `README.md`、`pom.xml`、`core/pom.xml` | Maven 多模块，JDK 17，核心代码在 `core`，测试使用 JUnit 5、Mockito、junit-pioneer、AssertJ。仓库内未见 `AGENTS.md` 或 `.agentnative/templates/default/*`。 |
 | 参考实现 | `/tmp/veadk-python-ref/veadk/.../vikingdb_knowledge_backend.py`、`.../vikingdb_memory_backend.py` | 仅参考 API key 清洗、环境变量、数据面 Bearer 请求、API-key-only 跳过管理预检查；不照搬 Python 专属 Pydantic / SDK 结构。 |
@@ -49,12 +50,13 @@ updated_at: "2026-10-13"
 1. 在 `EnvUtil` 增加 Viking KnowledgeBase 与 Viking Memory API key 环境变量读取与清洗能力。
 2. 在 `VikingKnowledgebaseConfig` 增加 `apiKey` 字段和 builder，保持既有构造器可用。
 3. 在 `KnowledgeBase.Builder` 增加 `vikingApiKey(String)` 或等价显式入口，仅用于 `backend("viking")`。
-4. 在 `VikingKnowledgebaseWrapper` 与 `VikingMemoryWrapper` 中拆分管理面 AK/SK 与数据面 API key：
+4. 在 `VikingMemoryService` 增加 `public VikingMemoryService(String appName, String apiKey)`，作为 Java SDK 用户显式配置 Memory API key 的 public 入口；保留一参构造器并委托到同一解析逻辑。
+5. 在 `VikingKnowledgebaseWrapper` 与 `VikingMemoryWrapper` 中拆分管理面 AK/SK 与数据面 API key：
    - 管理面 `GetCollection` / `CreateCollection` / `AddDoc` 继续使用现有 Volc SDK `json(...)` AK/SK 签名路径。
    - 数据面 `SearchKnowledge` / `SearchMemory` / `AddSession` 当存在有效 API key 时使用 JDK `HttpClient` 构造 Bearer 请求。
    - API key 不存在时继续使用现有 `json(...)` AK/SK 路径。
-5. 在 `VikingKnowledgebaseBackend` 和 `VikingMemoryService` 构造阶段，若有效 API key 存在且 AK/SK 管理凭据不可用，则跳过 collection precheck/create；若 AK/SK 可用，则保留现有管理面行为。
-6. 更新 README 的 Viking credential 说明，明确数据面 API key 与管理面边界。
+6. 在 `VikingKnowledgebaseBackend` 和 `VikingMemoryService` 构造阶段，若有效 API key 存在且 AK/SK 管理凭据不可用，则跳过 collection precheck/create；若 AK/SK 可用，则保留现有管理面行为。
+7. 更新 README 的 Viking credential 说明，明确数据面 API key 与管理面边界。
 
 核心设计原则：
 
@@ -72,7 +74,7 @@ updated_at: "2026-10-13"
 | Env | `core/src/main/java/com/volcengine/veadk/utils/EnvUtil.java` | 新增 `getVikingKnowledgebaseApiKey()`、`getVikingMemoryApiKey()` 与清洗逻辑。 | REQ-004 |
 | KnowledgeBase backend | `core/src/main/java/com/volcengine/veadk/knowledgebase/backends/viking/VikingKnowledgebaseBackend.java` | 构造 wrapper 时传入 apiKey；API-key-only 跳过 `ensureCollection()`；search 保持结果映射。 | REQ-001, REQ-005, REQ-006, REQ-007 |
 | KnowledgeBase integration | `core/src/main/java/com/volcengine/veadk/integration/vikingknowledgebase/VikingKnowledgebaseWrapper.java` | 新增 API key 数据面 POST helper；`searchKnowledge` 按 apiKey/AK-SK 分支调用。 | REQ-001, REQ-005, REQ-006 |
-| Memory service | `core/src/main/java/com/volcengine/veadk/memory/viking/VikingMemoryService.java` | 构造 wrapper 时传入 Memory API key；API-key-only 跳过 precheck/create；空消息行为不变。 | REQ-002, REQ-003, REQ-005, REQ-006 |
+| Memory service | `core/src/main/java/com/volcengine/veadk/memory/viking/VikingMemoryService.java` | 新增 public 显式 API key 构造入口；构造 wrapper 时按显式值优先传入 Memory API key；API-key-only 跳过 precheck/create；空消息行为不变。 | REQ-002, REQ-003, REQ-004, REQ-005, REQ-006 |
 | Memory integration | `core/src/main/java/com/volcengine/veadk/integration/vikingmemory/VikingMemoryWrapper.java` | 新增 API key 数据面 POST helper；`searchMemory` / `addSession` 按 apiKey/AK-SK 分支调用。 | REQ-002, REQ-003, REQ-006 |
 | Docs | `README.md` | 补充 `DATABASE_VIKING_API_KEY` / `DATABASE_VIKINGMEM_API_KEY` 与数据面/管理面边界。 | REQ-007 |
 | Tests | `core/src/test/java/...` | 补齐配置、分支、请求 header、跳过管理预检查、兼容性、脱敏测试。 | REQ-001 至 REQ-007 |
@@ -86,12 +88,12 @@ updated_at: "2026-10-13"
 | F-03 | `core/src/main/java/com/volcengine/veadk/knowledgebase/KnowledgeBase.java` | 修改 | 对 public builder 暴露 Viking API key 配置入口。 | REQ-001, REQ-004 |
 | F-04 | `core/src/main/java/com/volcengine/veadk/knowledgebase/backends/viking/VikingKnowledgebaseBackend.java` | 修改 | API-key-only 初始化边界与 search 数据面分支传递。 | REQ-001, REQ-005, REQ-006, REQ-007 |
 | F-05 | `core/src/main/java/com/volcengine/veadk/integration/vikingknowledgebase/VikingKnowledgebaseWrapper.java` | 修改 | KB 数据面 Bearer POST 与 AK/SK 兼容路径。 | REQ-001, REQ-006 |
-| F-06 | `core/src/main/java/com/volcengine/veadk/memory/viking/VikingMemoryService.java` | 修改 | Memory API key 读取、API-key-only precheck 边界、数据面调用不变形。 | REQ-002, REQ-003, REQ-005, REQ-006 |
+| F-06 | `core/src/main/java/com/volcengine/veadk/memory/viking/VikingMemoryService.java` | 修改 | 新增用户可调用的 public 显式 API key 构造入口，完成 Memory API key 读取、显式优先级、API-key-only precheck 边界和数据面调用不变形。 | REQ-002, REQ-003, REQ-004, REQ-005, REQ-006 |
 | F-07 | `core/src/main/java/com/volcengine/veadk/integration/vikingmemory/VikingMemoryWrapper.java` | 修改 | Memory search/add Bearer POST 与 AK/SK 兼容路径。 | REQ-002, REQ-003, REQ-006 |
 | F-08 | `core/src/test/java/com/volcengine/veadk/utils/EnvUtilTest.java` | 修改 | API key 环境变量和清洗单测。 | REQ-004 |
 | F-09 | `core/src/test/java/com/volcengine/veadk/knowledgebase/backends/viking/VikingKnowledgebaseBackendTest.java` | 修改 | KB API-key-only precheck 和兼容性单测。 | REQ-001, REQ-005, REQ-006 |
 | F-10 | `core/src/test/java/com/volcengine/veadk/integration/vikingknowledgebase/VikingKnowledgebaseWrapperTest.java` | 修改 | KB Bearer header、AK/SK 分支、失败不泄露单测。 | REQ-001, REQ-006 |
-| F-11 | `core/src/test/java/com/volcengine/veadk/memory/viking/VikingMemoryServiceTest.java` | 修改 | Memory API-key-only precheck、空消息行为、search/add 兼容单测。 | REQ-002, REQ-003, REQ-005 |
+| F-11 | `core/src/test/java/com/volcengine/veadk/memory/viking/VikingMemoryServiceTest.java` | 修改 | Memory public 显式 API key 优先级、API-key-only precheck、空消息行为、search/add 兼容单测。 | REQ-002, REQ-003, REQ-004, REQ-005 |
 | F-12 | `core/src/test/java/com/volcengine/veadk/integration/vikingmemory/VikingMemoryWrapperTest.java` | 修改 | Memory Bearer header、search/add 分支、失败不泄露单测。 | REQ-002, REQ-003 |
 | F-13 | `core/src/test/java/com/volcengine/veadk/knowledgebase/KnowledgeBaseTest.java` | 修改 | public builder 显式 API key 传递测试。 | REQ-004 |
 | F-14 | `README.md` | 修改 | 文档说明新增环境变量和 API key 数据面范围。 | REQ-007 |
@@ -105,7 +107,7 @@ updated_at: "2026-10-13"
 | 配置字段 | 来源 | 清洗规则 | 用途 |
 |---|---|---|---|
 | KnowledgeBase API key | 显式 `VikingKnowledgebaseConfig.apiKey` / `KnowledgeBase.Builder.vikingApiKey` 或 `DATABASE_VIKING_API_KEY` | trim；空字符串、`None`、`null` 忽略大小写视为未配置。 | `SearchKnowledge` 数据面 Bearer 请求。 |
-| Memory API key | `VikingMemoryService` 新增构造入口或 `DATABASE_VIKINGMEM_API_KEY` | 同上。 | `SearchMemory` / `AddSession` 数据面 Bearer 请求。 |
+| Memory API key | public `VikingMemoryService(String appName, String apiKey)` 显式参数或 `DATABASE_VIKINGMEM_API_KEY` | 同上；显式有效值必须优先于环境变量。 | `SearchMemory` / `AddSession` 数据面 Bearer 请求。 |
 | AK/SK | 既有显式配置或 `VOLCENGINE_ACCESS_KEY` / `VOLCENGINE_SECRET_KEY` | 维持现有 `EnvUtil` 行为。 | 管理面 precheck/create/addDoc 与无 API key 时的数据面。 |
 
 ## 5. API / SDK 契约
@@ -124,14 +126,17 @@ KnowledgeBase：
 Memory：
 
 - `VikingMemoryService(String appName)` 保留。
-- 新增兼容构造入口，例如 `VikingMemoryService(String appName, String apiKey)` 或内部 package-private config 构造器，用于显式 API key 和测试注入。
-- 默认构造器从 `EnvUtil.getVikingMemoryApiKey()` 读取环境 API key。
+- 必须新增用户可调用的 public 构造入口 `VikingMemoryService(String appName, String apiKey)`，用于显式传入 Memory API key。该 public 入口是满足 REQ-002.1 / REQ-004.1 的 SDK 契约，不得用 package-private 构造器、测试注入入口或仅内部 config 注入替代。
+- `VikingMemoryService(String appName)` 委托到同一解析逻辑，等价于显式 API key 为 `null`，因此从 `EnvUtil.getVikingMemoryApiKey()` 读取环境 API key。
+- 内部 package-private 构造器、transport/client 注入或 wrapper 注入只允许作为测试 seam 或实现细节，不能作为用户显式配置 API key 的唯一入口。
 
 优先级：
 
 1. 显式有效 API key。
 2. 对应环境变量有效 API key。
 3. 现有 AK/SK / session token /默认行为。
+
+上述优先级对 KnowledgeBase 与 Memory 分别独立生效；Memory 必须覆盖 `new VikingMemoryService(appName, "explicit-key")` 在 `DATABASE_VIKINGMEM_API_KEY` 同时存在时选择显式值的场景。
 
 ### 5.2 数据面请求契约
 
@@ -180,11 +185,13 @@ Memory `searchMemory` / `addSession`：
 ### REQ-002 / REQ-003: Viking Memory search/add
 
 1. `VikingMemoryService` 校验 appName。
-2. 解析 `DATABASE_VIKINGMEM_MEMORY_TYPE`，保持当前逗号拆分默认行为。
-3. 解析 Memory API key 并构造 `VikingMemoryWrapper(accessKey, secretKey, apiKey)`。
-4. 若 API key 有效且 AK/SK 不完整，跳过 collection precheck/create。
-5. `addSessionToMemory` 继续只收集有效 user text message；无有效 message 直接 complete。
-6. `searchMemory` / `addSession` 在 wrapper 内按 API key / AK-SK 分支请求并保持 public result shape。
+2. 一参构造器将显式 API key 视为 `null`；二参 public 构造器接收调用方传入的显式 API key。
+3. 解析 `DATABASE_VIKINGMEM_MEMORY_TYPE`，保持当前逗号拆分默认行为。
+4. 选择 Memory API key：清洗后的显式参数有效时使用显式值；显式值为空、`None`、`null` 或未传时再读取 `DATABASE_VIKINGMEM_API_KEY`；均无有效值时回退 AK/SK。
+5. 构造 `VikingMemoryWrapper(accessKey, secretKey, selectedApiKey)`。
+6. 若 selectedApiKey 有效且 AK/SK 不完整，跳过 collection precheck/create。
+7. `addSessionToMemory` 继续只收集有效 user text message；无有效 message 直接 complete。
+8. `searchMemory` / `addSession` 在 wrapper 内按 API key / AK-SK 分支请求并保持 public result shape。
 
 ## 7. 状态机、异步任务与并发
 
@@ -193,7 +200,7 @@ Memory `searchMemory` / `addSession`：
 并发影响：
 
 - API key 解析为 immutable config field，不在请求过程中修改。
-- JDK `HttpClient` 可作为 wrapper 实例字段复用；测试中通过 package-private transport/client 注入避免全局静态状态。
+- JDK `HttpClient` 可作为 wrapper 实例字段复用；测试中通过 package-private transport/client 注入避免全局静态状态。此类 package-private 注入只服务测试可控性，不承担 Memory API key 的 public 用户配置契约。
 - 不新增缓存、重试队列或后台线程。
 
 ## 8. 外部依赖
@@ -276,7 +283,8 @@ Memory `searchMemory` / `addSession`：
 | KB API-key-only 构造跳过管理预检查 | mock wrapper，断言不调用 `isCollectionExists` / `createCollection` | REQ-005 |
 | KB search Bearer 请求 | 注入 fake HTTP transport，断言 `Authorization: Bearer <key>`，且不调用 AK/SK json 分支 | REQ-001 |
 | KB AK/SK 兼容 | API key absent，沿用现有 wrapper `json(...)` 测试 | REQ-006 |
-| Memory API key 环境变量与显式优先级 | `EnvUtilTest` / service 构造测试 | REQ-002, REQ-003, REQ-004 |
+| Memory public 显式 API key 优先于环境变量 | `VikingMemoryService(String appName, String apiKey)` 构造测试，断言显式有效值覆盖 `DATABASE_VIKINGMEM_API_KEY` | REQ-002, REQ-003, REQ-004 |
+| Memory 空显式 API key 回退环境变量 | `VikingMemoryService` 构造测试覆盖 `""`、`"None"`、`"null"`、空白和 `null` 参数 | REQ-004 |
 | Memory API-key-only 构造跳过 precheck/create | mock wrapper，断言不调用管理面 | REQ-005 |
 | Memory search/add Bearer 请求 | fake HTTP transport，分别覆盖 `/api/memory/search` 和 `/api/memory/session/add` | REQ-002, REQ-003 |
 | Memory 空消息不调用数据面 | 复用现有 `addSessionToMemory_noValidMessages` 并覆盖 API key wrapper | REQ-003 |
@@ -296,9 +304,9 @@ Memory `searchMemory` / `addSession`：
 | REQ | Design | Task | Test |
 |---|---|---|---|
 | REQ-001 | KB config、wrapper Bearer search、结果映射 | T1, T2, T5 | KB env/priority、Bearer request、AK/SK compatibility |
-| REQ-002 | Memory wrapper Bearer search | T1, T3, T5 | Memory env/priority、search Bearer request |
-| REQ-003 | Memory wrapper Bearer add session、service 空消息保持 | T1, T3, T5 | add Bearer request、no-valid-message no-call |
-| REQ-004 | `EnvUtil` 清洗与显式优先级 | T1, T5 | blank/None/null fallback、explicit overrides env |
+| REQ-002 | Memory public API key 构造入口、wrapper Bearer search | T1, T3, T5 | Memory public explicit constructor、search Bearer request |
+| REQ-003 | Memory public API key 构造入口、wrapper Bearer add session、service 空消息保持 | T1, T3, T5 | add Bearer request、no-valid-message no-call |
+| REQ-004 | `EnvUtil` 清洗与 KnowledgeBase/Memory 显式优先级 | T1, T5 | blank/None/null fallback、explicit overrides env，Memory public constructor overrides env |
 | REQ-005 | API-key-only precheck skip | T2, T3, T5 | KB/Memory constructor skip management precheck |
 | REQ-006 | AK/SK fallback 与非范围不变 | T2, T3, T5 | API key absent old tests, OpenSearch/Mem0 untouched |
 | REQ-007 | README 和 addDoc 管理面边界 | T4, T5 | README review, addDoc AK/SK existing test |
