@@ -11,6 +11,7 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 import org.mockito.MockedConstruction;
 import org.mockito.MockedStatic;
@@ -87,7 +88,8 @@ class KnowledgeBaseTest {
 
     @Test
     void builderCreatesVikingBackend() throws IOException {
-        try (MockedStatic<EnvUtil> mockedEnv = Mockito.mockStatic(EnvUtil.class);
+        try (MockedStatic<EnvUtil> mockedEnv =
+                        Mockito.mockStatic(EnvUtil.class, Mockito.CALLS_REAL_METHODS);
                 MockedConstruction<VikingKnowledgebaseWrapper> mockedCtor =
                         Mockito.mockConstruction(
                                 VikingKnowledgebaseWrapper.class,
@@ -101,14 +103,57 @@ class KnowledgeBaseTest {
                                                             vikingEntry(
                                                                     "viking answer", Map.of())));
                                 })) {
-            mockedEnv.when(EnvUtil::getAccessKey).thenReturn("ak");
-            mockedEnv.when(EnvUtil::getSecretKey).thenReturn("sk");
+            mockedEnv.when(EnvUtil::getOptionalAccessKey).thenReturn("ak");
+            mockedEnv.when(EnvUtil::getOptionalSecretKey).thenReturn("sk");
+            mockedEnv.when(EnvUtil::getVikingKnowledgebaseApiKey).thenReturn(null);
 
             KnowledgeBase knowledgeBase =
                     KnowledgeBase.builder().backend("viking").appName("KbApp").topK(4).build();
 
             assertEquals("viking answer", knowledgeBase.search("q").get(0).getContent());
         }
+    }
+
+    @Test
+    void builderVikingApiKey_prefersExplicitKeyOverEnvironment() {
+        AtomicReference<List<?>> constructorArgs = new AtomicReference<>();
+        try (MockedStatic<EnvUtil> mockedEnv =
+                        Mockito.mockStatic(EnvUtil.class, Mockito.CALLS_REAL_METHODS);
+                MockedConstruction<VikingKnowledgebaseWrapper> ignored =
+                        Mockito.mockConstruction(
+                                VikingKnowledgebaseWrapper.class,
+                                (mock, context) -> constructorArgs.set(context.arguments()))) {
+            mockedEnv.when(EnvUtil::getOptionalAccessKey).thenReturn(null);
+            mockedEnv.when(EnvUtil::getOptionalSecretKey).thenReturn(null);
+            mockedEnv.when(EnvUtil::getVikingKnowledgebaseApiKey).thenReturn("env-api-key");
+
+            KnowledgeBase.builder()
+                    .backend("viking")
+                    .appName("KbApp")
+                    .vikingApiKey(" explicit-api-key ")
+                    .build();
+
+            assertEquals("explicit-api-key", constructorArgs.get().get(2));
+        }
+    }
+
+    @Test
+    void builderVikingApiKey_doesNotAffectOpensearchBackend() {
+        KnowledgeBase knowledgeBase =
+                KnowledgeBase.builder()
+                        .backend("opensearch")
+                        .index("Index")
+                        .backendInstance(new FakeBackend())
+                        .vikingApiKey("ignored")
+                        .build();
+
+        assertTrue(
+                knowledgeBase
+                                .searchKnowledgebase("q")
+                                .blockingGet()
+                                .getKnowledgebaseEntries()
+                                .size()
+                        == 1);
     }
 
     private static com.volcengine.veadk.integration.vikingknowledgebase.KnowledgebaseEntry

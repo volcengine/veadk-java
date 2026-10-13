@@ -23,14 +23,21 @@ import com.volcengine.model.Credentials;
 import com.volcengine.model.ServiceInfo;
 import com.volcengine.model.response.RawResponse;
 import com.volcengine.service.BaseServiceImpl;
+import com.volcengine.veadk.utils.EnvUtil;
 import com.volcengine.veadk.utils.JSONUtil;
 import java.io.IOException;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse.BodyHandlers;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.http.Header;
 import org.apache.http.message.BasicHeader;
 import org.slf4j.Logger;
@@ -39,6 +46,13 @@ import org.slf4j.LoggerFactory;
 public class VikingKnowledgebaseWrapper extends BaseServiceImpl {
 
     private static final Logger log = LoggerFactory.getLogger(VikingKnowledgebaseWrapper.class);
+    private static final String BASE_URL = "https://api-knowledgebase.mlp.cn-beijing.volces.com";
+    private static final String SEARCH_KNOWLEDGE_PATH =
+            "/api/knowledge/collection/search_knowledge";
+    private static final Duration HTTP_TIMEOUT = Duration.ofSeconds(5);
+
+    private final String apiKey;
+    private final VikingHttpTransport transport;
 
     private static ServiceInfo SERVICE_INFO =
             new ServiceInfo(
@@ -135,9 +149,24 @@ public class VikingKnowledgebaseWrapper extends BaseServiceImpl {
             };
 
     public VikingKnowledgebaseWrapper(String accessKey, String secretKey) {
+        this(accessKey, secretKey, null);
+    }
+
+    public VikingKnowledgebaseWrapper(String accessKey, String secretKey, String apiKey) {
+        this(accessKey, secretKey, apiKey, new JdkVikingHttpTransport());
+    }
+
+    VikingKnowledgebaseWrapper(
+            String accessKey, String secretKey, String apiKey, VikingHttpTransport transport) {
         super(SERVICE_INFO, API_INFO_LIST);
-        setAccessKey(accessKey);
-        setSecretKey(secretKey);
+        if (StringUtils.isNotBlank(accessKey)) {
+            setAccessKey(accessKey);
+        }
+        if (StringUtils.isNotBlank(secretKey)) {
+            setSecretKey(secretKey);
+        }
+        this.apiKey = EnvUtil.sanitizeApiKey(apiKey);
+        this.transport = transport;
     }
 
     public boolean isCollectionExists(String collectionName) {
@@ -263,22 +292,25 @@ public class VikingKnowledgebaseWrapper extends BaseServiceImpl {
             body.put("post_processing", postProcessing);
 
             String bodyStr = JSONUtil.toJson(body);
-            RawResponse response = json("SearchKnowledge", null, bodyStr);
+            VikingHttpResponse response =
+                    StringUtils.isNotBlank(apiKey)
+                            ? postWithApiKey(SEARCH_KNOWLEDGE_PATH, bodyStr)
+                            : postWithAkSk("SearchKnowledge", bodyStr);
 
-            if (response.getCode() != SdkError.SUCCESS.getNumber()) {
-                log.error(
-                        "SearchKnowledge request:{}, raw response:{}",
-                        bodyStr,
-                        response.getException());
+            if (!response.isSuccess()) {
+                log.warn(
+                        "SearchKnowledge failed, path:{}, status:{}",
+                        SEARCH_KNOWLEDGE_PATH,
+                        response.statusCode());
                 return Collections.emptyList();
             }
 
             log.debug(
                     "SearchKnowledge request:{}, raw response:{}",
                     bodyStr,
-                    JSONUtil.parseJson(response.getData()));
+                    JSONUtil.parseJson(response.body()));
 
-            JsonNode rootNode = JSONUtil.parseJson(response.getData());
+            JsonNode rootNode = JSONUtil.parseJson(response.body());
             JsonNode resultList = rootNode.path("data").path("result_list");
 
             List<KnowledgebaseEntry> entries = new ArrayList<>();
@@ -306,6 +338,72 @@ public class VikingKnowledgebaseWrapper extends BaseServiceImpl {
         } catch (IOException e) {
             log.error("searchKnowledge failed", e);
             return Collections.emptyList();
+        }
+    }
+
+    private VikingHttpResponse postWithAkSk(String action, String bodyStr) throws IOException {
+        RawResponse response = json(action, null, bodyStr);
+        String body = response.getData() == null ? "" : new String(response.getData());
+        return new VikingHttpResponse(response.getCode(), body);
+    }
+
+    private VikingHttpResponse postWithApiKey(String path, String bodyStr) throws IOException {
+        HttpRequest request =
+                HttpRequest.newBuilder(URI.create(BASE_URL + path))
+                        .timeout(HTTP_TIMEOUT)
+                        .header("Accept", "application/json")
+                        .header("Content-Type", "application/json")
+                        .header("Authorization", "Bearer " + apiKey)
+                        .POST(HttpRequest.BodyPublishers.ofString(bodyStr))
+                        .build();
+        try {
+            return transport.send(request);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IOException("Interrupted while calling Viking KnowledgeBase API.", e);
+        }
+    }
+
+    interface VikingHttpTransport {
+        VikingHttpResponse send(HttpRequest request) throws IOException, InterruptedException;
+    }
+
+    static class VikingHttpResponse {
+        private final int statusCode;
+        private final String body;
+
+        VikingHttpResponse(int statusCode, String body) {
+            this.statusCode = statusCode;
+            this.body = body;
+        }
+
+        boolean isSuccess() {
+            return statusCode == SdkError.SUCCESS.getNumber()
+                    || (statusCode >= 200 && statusCode < 300);
+        }
+
+        int statusCode() {
+            return statusCode;
+        }
+
+        String body() {
+            return body;
+        }
+    }
+
+    private static class JdkVikingHttpTransport implements VikingHttpTransport {
+        private final HttpClient httpClient;
+
+        JdkVikingHttpTransport() {
+            this.httpClient = HttpClient.newHttpClient();
+        }
+
+        @Override
+        public VikingHttpResponse send(HttpRequest request)
+                throws IOException, InterruptedException {
+            java.net.http.HttpResponse<String> response =
+                    httpClient.send(request, BodyHandlers.ofString());
+            return new VikingHttpResponse(response.statusCode(), response.body());
         }
     }
 }

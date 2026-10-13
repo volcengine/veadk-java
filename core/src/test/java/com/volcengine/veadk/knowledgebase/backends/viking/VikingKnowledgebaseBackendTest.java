@@ -1,6 +1,7 @@
 package com.volcengine.veadk.knowledgebase.backends.viking;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.never;
@@ -13,6 +14,7 @@ import com.volcengine.veadk.utils.EnvUtil;
 import java.io.IOException;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 import org.mockito.MockedConstruction;
 import org.mockito.MockedStatic;
@@ -22,7 +24,8 @@ class VikingKnowledgebaseBackendTest {
 
     @Test
     void constructor_invalidCollectionName_shouldThrowBeforeConstructingWrapper() {
-        try (MockedStatic<EnvUtil> mockedEnv = Mockito.mockStatic(EnvUtil.class);
+        try (MockedStatic<EnvUtil> mockedEnv =
+                        Mockito.mockStatic(EnvUtil.class, Mockito.CALLS_REAL_METHODS);
                 MockedConstruction<VikingKnowledgebaseWrapper> mockedCtor =
                         Mockito.mockConstruction(VikingKnowledgebaseWrapper.class)) {
             assertThrows(
@@ -36,15 +39,17 @@ class VikingKnowledgebaseBackendTest {
     @Test
     void constructor_validCollectionMissing_shouldCreateCollection() {
         String collectionName = "KbApp";
-        try (MockedStatic<EnvUtil> mockedEnv = Mockito.mockStatic(EnvUtil.class);
+        try (MockedStatic<EnvUtil> mockedEnv =
+                        Mockito.mockStatic(EnvUtil.class, Mockito.CALLS_REAL_METHODS);
                 MockedConstruction<VikingKnowledgebaseWrapper> mockedCtor =
                         Mockito.mockConstruction(
                                 VikingKnowledgebaseWrapper.class,
                                 (mock, context) -> {
                                     when(mock.isCollectionExists(collectionName)).thenReturn(false);
                                 })) {
-            mockedEnv.when(EnvUtil::getAccessKey).thenReturn("ak");
-            mockedEnv.when(EnvUtil::getSecretKey).thenReturn("sk");
+            mockedEnv.when(EnvUtil::getOptionalAccessKey).thenReturn("ak");
+            mockedEnv.when(EnvUtil::getOptionalSecretKey).thenReturn("sk");
+            mockedEnv.when(EnvUtil::getVikingKnowledgebaseApiKey).thenReturn(null);
 
             new VikingKnowledgebaseBackend(collectionName);
 
@@ -57,15 +62,17 @@ class VikingKnowledgebaseBackendTest {
     @Test
     void constructor_validCollectionExists_shouldNotCreateCollection() {
         String collectionName = "KbApp";
-        try (MockedStatic<EnvUtil> mockedEnv = Mockito.mockStatic(EnvUtil.class);
+        try (MockedStatic<EnvUtil> mockedEnv =
+                        Mockito.mockStatic(EnvUtil.class, Mockito.CALLS_REAL_METHODS);
                 MockedConstruction<VikingKnowledgebaseWrapper> mockedCtor =
                         Mockito.mockConstruction(
                                 VikingKnowledgebaseWrapper.class,
                                 (mock, context) -> {
                                     when(mock.isCollectionExists(collectionName)).thenReturn(true);
                                 })) {
-            mockedEnv.when(EnvUtil::getAccessKey).thenReturn("ak");
-            mockedEnv.when(EnvUtil::getSecretKey).thenReturn("sk");
+            mockedEnv.when(EnvUtil::getOptionalAccessKey).thenReturn("ak");
+            mockedEnv.when(EnvUtil::getOptionalSecretKey).thenReturn("sk");
+            mockedEnv.when(EnvUtil::getVikingKnowledgebaseApiKey).thenReturn(null);
 
             new VikingKnowledgebaseBackend(collectionName);
 
@@ -73,6 +80,61 @@ class VikingKnowledgebaseBackendTest {
             verify(wrapper).isCollectionExists(collectionName);
             verify(wrapper, never()).createCollection(collectionName);
         }
+    }
+
+    @Test
+    void constructor_apiKeyOnly_shouldSkipCollectionPrecheck() {
+        String collectionName = "KbApp";
+        VikingKnowledgebaseConfig config =
+                VikingKnowledgebaseConfig.builder().apiKey(" api-key ").build();
+        AtomicReference<List<?>> constructorArgs = new AtomicReference<>();
+        try (MockedConstruction<VikingKnowledgebaseWrapper> mockedCtor =
+                Mockito.mockConstruction(
+                        VikingKnowledgebaseWrapper.class,
+                        (mock, context) -> constructorArgs.set(context.arguments()))) {
+            new VikingKnowledgebaseBackend(collectionName, config);
+
+            VikingKnowledgebaseWrapper wrapper = mockedCtor.constructed().get(0);
+            verify(wrapper, never()).isCollectionExists(collectionName);
+            verify(wrapper, never()).createCollection(collectionName);
+            assertEquals("api-key", constructorArgs.get().get(2));
+        }
+    }
+
+    @Test
+    void constructor_withoutApiKeyOrManagementCredentials_shouldThrow() {
+        VikingKnowledgebaseConfig config = VikingKnowledgebaseConfig.builder().build();
+
+        assertThrows(
+                IllegalStateException.class, () -> new VikingKnowledgebaseBackend("KbApp", config));
+    }
+
+    @Test
+    void config_legacyConstructorAndBuilderExposeCredentialsAndApiKey() {
+        VikingKnowledgebaseConfig legacyConfig =
+                new VikingKnowledgebaseConfig("ak", "sk", false, 1);
+
+        assertEquals("ak", legacyConfig.getAccessKey());
+        assertEquals("sk", legacyConfig.getSecretKey());
+        assertFalse(legacyConfig.hasApiKey());
+        assertTrue(legacyConfig.hasManagementCredentials());
+
+        VikingKnowledgebaseConfig config =
+                VikingKnowledgebaseConfig.builder()
+                        .accessKey("builder-ak")
+                        .secretKey("builder-sk")
+                        .apiKey(" builder-api-key ")
+                        .rerank(false)
+                        .chunkDiffusionCount(2)
+                        .build();
+
+        assertEquals("builder-ak", config.getAccessKey());
+        assertEquals("builder-sk", config.getSecretKey());
+        assertEquals("builder-api-key", config.getApiKey());
+        assertFalse(config.isRerank());
+        assertEquals(2, config.getChunkDiffusionCount());
+        assertTrue(config.hasApiKey());
+        assertTrue(config.hasManagementCredentials());
     }
 
     @Test

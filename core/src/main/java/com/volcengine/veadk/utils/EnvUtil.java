@@ -26,6 +26,8 @@ public class EnvUtil {
     private static final String TLS_SERVICE_NAME = "OBSERVABILITY_OPENTELEMETRY_TLS_SERVICE_NAME";
     private static final String TLS_REGION = "OBSERVABILITY_OPENTELEMETRY_TLS_REGION";
     private static final String VIKINGMEM_MEMORY_TYPE = "DATABASE_VIKINGMEM_MEMORY_TYPE";
+    private static final String VIKING_API_KEY = "DATABASE_VIKING_API_KEY";
+    private static final String VIKINGMEM_API_KEY = "DATABASE_VIKINGMEM_API_KEY";
     private static final String MODEL_AGENT_API_KEY = "MODEL_AGENT_API_KEY";
     private static final String MODEL_AGENT_API_KEY_ID = "MODEL_AGENT_API_KEY_ID";
     private static final String MODEL_AGENT_API_KEY_NAME = "MODEL_AGENT_API_KEY_NAME";
@@ -208,12 +210,20 @@ public class EnvUtil {
         return accessKey;
     }
 
+    public static String getOptionalAccessKey() {
+        return StringUtils.trimToNull(System.getenv(VOLCENGINE_ACCESS_KEY));
+    }
+
     public static String getSecretKey() {
         String secretKey = System.getenv(VOLCENGINE_SECRET_KEY);
         if (StringUtils.isBlank(secretKey)) {
             throw getIllegalStateException(VOLCENGINE_SECRET_KEY);
         }
         return secretKey;
+    }
+
+    public static String getOptionalSecretKey() {
+        return StringUtils.trimToNull(System.getenv(VOLCENGINE_SECRET_KEY));
     }
 
     public static String getSessionToken() {
@@ -294,6 +304,27 @@ public class EnvUtil {
             return DEFAULT_VIKING_MEMORY_TYPE;
         }
         return memoryType;
+    }
+
+    public static String getVikingKnowledgebaseApiKey() {
+        return sanitizeApiKey(System.getenv(VIKING_API_KEY));
+    }
+
+    public static String getVikingMemoryApiKey() {
+        return sanitizeApiKey(System.getenv(VIKINGMEM_API_KEY));
+    }
+
+    public static String resolveApiKey(String explicitApiKey, String fallbackApiKey) {
+        String sanitizedExplicit = sanitizeApiKey(explicitApiKey);
+        return sanitizedExplicit == null ? sanitizeApiKey(fallbackApiKey) : sanitizedExplicit;
+    }
+
+    public static String sanitizeApiKey(String apiKey) {
+        String sanitized = StringUtils.trimToNull(apiKey);
+        if ("none".equalsIgnoreCase(sanitized) || "null".equalsIgnoreCase(sanitized)) {
+            return null;
+        }
+        return sanitized;
     }
 
     public static String getCodeSandboxUrl() {

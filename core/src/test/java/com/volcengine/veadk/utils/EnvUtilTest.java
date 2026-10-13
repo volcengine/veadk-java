@@ -70,6 +70,12 @@ class EnvUtilTest {
     }
 
     @Test
+    @SetEnvironmentVariable(key = "VOLCENGINE_ACCESS_KEY", value = " test_access_key ")
+    void getOptionalAccessKey_trimsValue() {
+        assertThat(EnvUtil.getOptionalAccessKey()).isEqualTo("test_access_key");
+    }
+
+    @Test
     @ClearEnvironmentVariable(key = "VOLCENGINE_ACCESS_KEY")
     void getAccessKey_withMissingEnv_shouldThrowException() {
         assertThatThrownBy(EnvUtil::getAccessKey).isInstanceOf(IllegalStateException.class);
@@ -138,6 +144,12 @@ class EnvUtilTest {
     @SetEnvironmentVariable(key = "VOLCENGINE_SECRET_KEY", value = "test_secret_key")
     void getSecretKey() {
         assertThat(EnvUtil.getSecretKey()).isEqualTo("test_secret_key");
+    }
+
+    @Test
+    @SetEnvironmentVariable(key = "VOLCENGINE_SECRET_KEY", value = " test_secret_key ")
+    void getOptionalSecretKey_trimsValue() {
+        assertThat(EnvUtil.getOptionalSecretKey()).isEqualTo("test_secret_key");
     }
 
     @Test
@@ -211,6 +223,37 @@ class EnvUtilTest {
     @ClearEnvironmentVariable(key = "DATABASE_VIKINGMEM_MEMORY_TYPE")
     void getVikingMmemoryType_withMissingEnv_shouldReturnDefault() {
         assertThat(EnvUtil.getVikingMmemoryType()).isEqualTo("sys_event_v1");
+    }
+
+    @Test
+    @SetEnvironmentVariable(key = "DATABASE_VIKING_API_KEY", value = " kb-api-key ")
+    void getVikingKnowledgebaseApiKey_trimsValue() {
+        assertThat(EnvUtil.getVikingKnowledgebaseApiKey()).isEqualTo("kb-api-key");
+    }
+
+    @Test
+    @SetEnvironmentVariable(key = "DATABASE_VIKINGMEM_API_KEY", value = " mem-api-key ")
+    void getVikingMemoryApiKey_trimsValue() {
+        assertThat(EnvUtil.getVikingMemoryApiKey()).isEqualTo("mem-api-key");
+    }
+
+    @Test
+    void sanitizeApiKey_treatsBlankNoneAndNullAsMissing() {
+        assertThat(EnvUtil.sanitizeApiKey(null)).isNull();
+        assertThat(EnvUtil.sanitizeApiKey(" ")).isNull();
+        assertThat(EnvUtil.sanitizeApiKey("None")).isNull();
+        assertThat(EnvUtil.sanitizeApiKey(" null ")).isNull();
+        assertThat(EnvUtil.sanitizeApiKey("NuLl")).isNull();
+        assertThat(EnvUtil.sanitizeApiKey(" valid-key ")).isEqualTo("valid-key");
+    }
+
+    @Test
+    void resolveApiKey_prefersExplicitAndFallsBackToEnv() {
+        assertThat(EnvUtil.resolveApiKey(" explicit-key ", "env-key")).isEqualTo("explicit-key");
+        assertThat(EnvUtil.resolveApiKey("None", " env-key ")).isEqualTo("env-key");
+        assertThat(EnvUtil.resolveApiKey("null", " env-key ")).isEqualTo("env-key");
+        assertThat(EnvUtil.resolveApiKey(" ", " env-key ")).isEqualTo("env-key");
+        assertThat(EnvUtil.resolveApiKey(null, "None")).isNull();
     }
 
     @Test

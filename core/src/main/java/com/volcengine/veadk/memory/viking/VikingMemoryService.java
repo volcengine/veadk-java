@@ -40,6 +40,10 @@ public class VikingMemoryService implements BaseMemoryService {
     private List<String> builtinEventTypes;
 
     public VikingMemoryService(String appName) {
+        this(appName, null);
+    }
+
+    public VikingMemoryService(String appName, String apiKey) {
         if (null != appName && !appName.matches("^[a-zA-Z][a-zA-Z0-9_]*$")) {
             throw new IllegalArgumentException(
                     "appName can only contain English letters, numbers, and underscores, and must"
@@ -49,9 +53,18 @@ public class VikingMemoryService implements BaseMemoryService {
 
         this.builtinEventTypes = List.of(EnvUtil.getVikingMmemoryType().split(","));
 
-        vikingMemoryWrapper =
-                new VikingMemoryWrapper(EnvUtil.getAccessKey(), EnvUtil.getSecretKey());
-        if (!vikingMemoryWrapper.isCollectionExists(appName)) {
+        String resolvedApiKey = EnvUtil.resolveApiKey(apiKey, EnvUtil.getVikingMemoryApiKey());
+        String accessKey = EnvUtil.getOptionalAccessKey();
+        String secretKey = EnvUtil.getOptionalSecretKey();
+        boolean hasManagementCredentials = accessKey != null && secretKey != null;
+        if (resolvedApiKey == null && !hasManagementCredentials) {
+            throw new IllegalStateException(
+                    "Missing required Viking credentials. Configure DATABASE_VIKINGMEM_API_KEY or"
+                            + " VOLCENGINE_ACCESS_KEY and VOLCENGINE_SECRET_KEY.");
+        }
+
+        vikingMemoryWrapper = new VikingMemoryWrapper(accessKey, secretKey, resolvedApiKey);
+        if (hasManagementCredentials && !vikingMemoryWrapper.isCollectionExists(appName)) {
             vikingMemoryWrapper.createCollection(appName, this.builtinEventTypes);
         }
     }

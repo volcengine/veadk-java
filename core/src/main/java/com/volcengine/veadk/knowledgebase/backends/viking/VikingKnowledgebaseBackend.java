@@ -37,9 +37,11 @@ public class VikingKnowledgebaseBackend implements BaseKnowledgebaseBackend {
     public VikingKnowledgebaseBackend(String collectionName, VikingKnowledgebaseConfig config) {
         this(
                 validateCollectionName(collectionName),
-                new VikingKnowledgebaseWrapper(config.getAccessKey(), config.getSecretKey()),
+                new VikingKnowledgebaseWrapper(
+                        config.getAccessKey(), config.getSecretKey(), config.getApiKey()),
                 config.isRerank(),
-                config.getChunkDiffusionCount());
+                config.getChunkDiffusionCount(),
+                shouldEnsureCollection(config));
     }
 
     VikingKnowledgebaseBackend(
@@ -47,12 +49,23 @@ public class VikingKnowledgebaseBackend implements BaseKnowledgebaseBackend {
             VikingKnowledgebaseWrapper wrapper,
             boolean rerank,
             int chunkDiffusionCount) {
+        this(collectionName, wrapper, rerank, chunkDiffusionCount, true);
+    }
+
+    VikingKnowledgebaseBackend(
+            String collectionName,
+            VikingKnowledgebaseWrapper wrapper,
+            boolean rerank,
+            int chunkDiffusionCount,
+            boolean ensureCollection) {
         this.collectionName = collectionName;
         this.wrapper = wrapper;
         this.rerank = rerank;
         this.chunkDiffusionCount = chunkDiffusionCount;
         precheckIndexNaming();
-        ensureCollection();
+        if (ensureCollection) {
+            ensureCollection();
+        }
     }
 
     @Override
@@ -81,6 +94,18 @@ public class VikingKnowledgebaseBackend implements BaseKnowledgebaseBackend {
         if (!wrapper.isCollectionExists(collectionName)) {
             wrapper.createCollection(collectionName);
         }
+    }
+
+    private static boolean shouldEnsureCollection(VikingKnowledgebaseConfig config) {
+        if (config.hasManagementCredentials()) {
+            return true;
+        }
+        if (config.hasApiKey()) {
+            return false;
+        }
+        throw new IllegalStateException(
+                "Missing required Viking credentials. Configure DATABASE_VIKING_API_KEY or"
+                        + " VOLCENGINE_ACCESS_KEY and VOLCENGINE_SECRET_KEY.");
     }
 
     private static KnowledgebaseEntry toKnowledgebaseEntry(

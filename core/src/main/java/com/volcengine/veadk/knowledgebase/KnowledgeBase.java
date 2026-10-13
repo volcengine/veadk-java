@@ -18,6 +18,7 @@ package com.volcengine.veadk.knowledgebase;
 import com.volcengine.veadk.knowledgebase.backends.BaseKnowledgebaseBackend;
 import com.volcengine.veadk.knowledgebase.backends.opensearch.OpensearchKnowledgebaseBackend;
 import com.volcengine.veadk.knowledgebase.backends.viking.VikingKnowledgebaseBackend;
+import com.volcengine.veadk.knowledgebase.backends.viking.VikingKnowledgebaseConfig;
 import io.reactivex.rxjava3.core.Completable;
 import io.reactivex.rxjava3.core.Single;
 import java.io.IOException;
@@ -116,6 +117,7 @@ public class KnowledgeBase implements BaseKnowledgebaseService, AutoCloseable {
         private String backend = "opensearch";
         private String appName = "";
         private String index = "";
+        private String vikingApiKey;
         private int topK = 10;
         private BaseKnowledgebaseBackend backendInstance;
 
@@ -142,6 +144,11 @@ public class KnowledgeBase implements BaseKnowledgebaseService, AutoCloseable {
             return this;
         }
 
+        public Builder vikingApiKey(String vikingApiKey) {
+            this.vikingApiKey = vikingApiKey;
+            return this;
+        }
+
         public Builder backendInstance(BaseKnowledgebaseBackend backendInstance) {
             this.backendInstance = backendInstance;
             return this;
@@ -162,7 +169,8 @@ public class KnowledgeBase implements BaseKnowledgebaseService, AutoCloseable {
                 return new OpensearchKnowledgebaseBackend(resolvedIndex);
             }
             if ("viking".equalsIgnoreCase(backend)) {
-                return new VikingKnowledgebaseBackend(resolvedIndex);
+                return new VikingKnowledgebaseBackend(
+                        resolvedIndex, VikingKnowledgebaseConfig.fromEnv(vikingApiKey));
             }
             throw new IllegalArgumentException("Unsupported knowledgebase backend: " + backend);
         }

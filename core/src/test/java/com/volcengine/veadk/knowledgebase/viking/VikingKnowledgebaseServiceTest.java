@@ -21,11 +21,13 @@ class VikingKnowledgebaseServiceTest {
 
     @Test
     void constructor_invalidAppName_shouldThrow_and_notConstructWrapper() {
-        try (MockedStatic<EnvUtil> mockedEnv = Mockito.mockStatic(EnvUtil.class);
+        try (MockedStatic<EnvUtil> mockedEnv =
+                        Mockito.mockStatic(EnvUtil.class, Mockito.CALLS_REAL_METHODS);
                 MockedConstruction<VikingKnowledgebaseWrapper> mockedCtor =
                         Mockito.mockConstruction(VikingKnowledgebaseWrapper.class)) {
-            mockedEnv.when(EnvUtil::getAccessKey).thenReturn("ak");
-            mockedEnv.when(EnvUtil::getSecretKey).thenReturn("sk");
+            mockedEnv.when(EnvUtil::getOptionalAccessKey).thenReturn("ak");
+            mockedEnv.when(EnvUtil::getOptionalSecretKey).thenReturn("sk");
+            mockedEnv.when(EnvUtil::getVikingKnowledgebaseApiKey).thenReturn(null);
 
             assertThrows(
                     IllegalArgumentException.class, () -> new VikingKnowledgebaseService("9bad"));
@@ -36,30 +38,33 @@ class VikingKnowledgebaseServiceTest {
     @Test
     void constructor_validApp_collectionExists_shouldNotCreate() {
         String appName = "MyApp";
-        try (MockedStatic<EnvUtil> mockedEnv = Mockito.mockStatic(EnvUtil.class);
+        try (MockedStatic<EnvUtil> mockedEnv =
+                        Mockito.mockStatic(EnvUtil.class, Mockito.CALLS_REAL_METHODS);
                 MockedConstruction<VikingKnowledgebaseWrapper> mockedCtor =
                         Mockito.mockConstruction(
                                 VikingKnowledgebaseWrapper.class,
                                 (mock, context) -> {
                                     Mockito.when(mock.isCollectionExists(appName)).thenReturn(true);
                                 })) {
-            mockedEnv.when(EnvUtil::getAccessKey).thenReturn("ak");
-            mockedEnv.when(EnvUtil::getSecretKey).thenReturn("sk");
+            mockedEnv.when(EnvUtil::getOptionalAccessKey).thenReturn("ak");
+            mockedEnv.when(EnvUtil::getOptionalSecretKey).thenReturn("sk");
+            mockedEnv.when(EnvUtil::getVikingKnowledgebaseApiKey).thenReturn(null);
 
             VikingKnowledgebaseService service = new VikingKnowledgebaseService(appName);
             VikingKnowledgebaseWrapper wrapperMock = mockedCtor.constructed().get(0);
 
             verify(wrapperMock).isCollectionExists(appName);
             verify(wrapperMock, never()).createCollection(appName);
-            mockedEnv.verify(EnvUtil::getAccessKey);
-            mockedEnv.verify(EnvUtil::getSecretKey);
+            mockedEnv.verify(EnvUtil::getOptionalAccessKey);
+            mockedEnv.verify(EnvUtil::getOptionalSecretKey);
         }
     }
 
     @Test
     void constructor_validApp_collectionMissing_shouldCreate() {
         String appName = "AppX";
-        try (MockedStatic<EnvUtil> mockedEnv = Mockito.mockStatic(EnvUtil.class);
+        try (MockedStatic<EnvUtil> mockedEnv =
+                        Mockito.mockStatic(EnvUtil.class, Mockito.CALLS_REAL_METHODS);
                 MockedConstruction<VikingKnowledgebaseWrapper> mockedCtor =
                         Mockito.mockConstruction(
                                 VikingKnowledgebaseWrapper.class,
@@ -67,8 +72,9 @@ class VikingKnowledgebaseServiceTest {
                                     Mockito.when(mock.isCollectionExists(appName))
                                             .thenReturn(false);
                                 })) {
-            mockedEnv.when(EnvUtil::getAccessKey).thenReturn("ak");
-            mockedEnv.when(EnvUtil::getSecretKey).thenReturn("sk");
+            mockedEnv.when(EnvUtil::getOptionalAccessKey).thenReturn("ak");
+            mockedEnv.when(EnvUtil::getOptionalSecretKey).thenReturn("sk");
+            mockedEnv.when(EnvUtil::getVikingKnowledgebaseApiKey).thenReturn(null);
 
             VikingKnowledgebaseService service = new VikingKnowledgebaseService(appName);
             VikingKnowledgebaseWrapper wrapperMock = mockedCtor.constructed().get(0);
@@ -84,7 +90,8 @@ class VikingKnowledgebaseServiceTest {
         List<KnowledgebaseEntry> mockEntries =
                 Collections.singletonList(new KnowledgebaseEntry("content1", Map.of("k", "v")));
 
-        try (MockedStatic<EnvUtil> mockedEnv = Mockito.mockStatic(EnvUtil.class);
+        try (MockedStatic<EnvUtil> mockedEnv =
+                        Mockito.mockStatic(EnvUtil.class, Mockito.CALLS_REAL_METHODS);
                 MockedConstruction<VikingKnowledgebaseWrapper> mockedCtor =
                         Mockito.mockConstruction(
                                 VikingKnowledgebaseWrapper.class,
@@ -95,8 +102,9 @@ class VikingKnowledgebaseServiceTest {
                                                             appName, "q", 5, null, true, 3))
                                             .thenReturn(mockEntries);
                                 })) {
-            mockedEnv.when(EnvUtil::getAccessKey).thenReturn("ak");
-            mockedEnv.when(EnvUtil::getSecretKey).thenReturn("sk");
+            mockedEnv.when(EnvUtil::getOptionalAccessKey).thenReturn("ak");
+            mockedEnv.when(EnvUtil::getOptionalSecretKey).thenReturn("sk");
+            mockedEnv.when(EnvUtil::getVikingKnowledgebaseApiKey).thenReturn(null);
 
             VikingKnowledgebaseService service = new VikingKnowledgebaseService(appName);
             SearchKnowledgebaseResponse response = service.searchKnowledgebase("q").blockingGet();

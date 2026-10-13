@@ -358,6 +358,13 @@ Start command:
 - If you need `web search`, `Viking Memory`, or `Viking Knowledgebase`, configure these environment variables:
   - `VOLCENGINE_ACCESS_KEY`: Volcengine AccessKey
   - `VOLCENGINE_SECRET_KEY`: Volcengine SecretKey
+- For Viking data-plane calls, you can configure API keys instead of AK/SK:
+  - `DATABASE_VIKING_API_KEY`: Viking Knowledgebase search API key
+  - `DATABASE_VIKINGMEM_API_KEY`: Viking Memory search and add-session API key
+- Explicit SDK API key parameters take precedence over the matching environment variable.
+  Viking API keys cover Knowledgebase search, Memory search, and Memory add-session only.
+  Collection management, Knowledgebase document ingestion, and TOS-backed `addDoc` still
+  require AK/SK or IAM credentials.
 - If you need `Mem0 Memory`, configure either a direct Mem0 API key:
   - `DATABASE_MEM0_API_KEY`: Mem0 API Key
   - `DATABASE_MEM0_BASE_URL`: Mem0 endpoint, for example `https://api.mem0.ai`

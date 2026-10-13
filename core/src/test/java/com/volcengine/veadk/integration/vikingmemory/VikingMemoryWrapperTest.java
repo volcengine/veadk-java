@@ -2,6 +2,7 @@ package com.volcengine.veadk.integration.vikingmemory;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.isNull;
@@ -10,10 +11,19 @@ import static org.mockito.Mockito.when;
 import com.volcengine.error.SdkError;
 import com.volcengine.model.response.RawResponse;
 import com.volcengine.veadk.utils.JSONUtil;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.net.http.HttpRequest;
+import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Optional;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Flow;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
@@ -167,5 +177,181 @@ class VikingMemoryWrapperTest {
                         2,
                         Collections.singletonList("sys_event_v1"));
         assertTrue(result.isEmpty());
+    }
+
+    @Test
+    void searchMemory_withApiKey_postsBearerRequest() throws Exception {
+        CapturingTransport transport =
+                new CapturingTransport(
+                        200,
+                        "{\"data\":{\"result_list\":[{\"memory_info\":{\"summary\":\"first\"}}]}}");
+        VikingMemoryWrapper wrapper = new VikingMemoryWrapper(null, null, "api-key", transport);
+
+        List<com.google.adk.memory.MemoryEntry> result =
+                wrapper.searchMemory(
+                        "test_collection",
+                        "user-1",
+                        "query",
+                        2,
+                        Collections.singletonList("sys_event_v1"));
+
+        assertEquals(1, result.size());
+        assertEquals(
+                "https://api-knowledgebase.mlp.cn-beijing.volces.com/api/memory/search",
+                transport.request.uri().toString());
+        assertEquals(
+                Optional.of("Bearer api-key"),
+                transport.request.headers().firstValue("Authorization"));
+        assertTrue(readBody(transport.request).contains("\"collection_name\":\"test_collection\""));
+        assertTrue(readBody(transport.request).contains("\"user_id\":\"user-1\""));
+        assertTrue(readBody(transport.request).contains("\"limit\":2"));
+    }
+
+    @Test
+    void addSession_withApiKey_postsBearerRequest() throws Exception {
+        CapturingTransport transport =
+                new CapturingTransport(200, "{\"data\":{\"session_id\":\"session-id\"}}");
+        VikingMemoryWrapper wrapper = new VikingMemoryWrapper(null, null, "api-key", transport);
+        List<Message> messages = Collections.singletonList(new Message("user", "hello"));
+        Metadata metadata = new Metadata("u1", "a1", 1L);
+
+        assertTrue(wrapper.addSession("test_collection", messages, metadata));
+
+        assertEquals(
+                "https://api-knowledgebase.mlp.cn-beijing.volces.com/api/memory/session/add",
+                transport.request.uri().toString());
+        assertEquals(
+                Optional.of("Bearer api-key"),
+                transport.request.headers().firstValue("Authorization"));
+        assertTrue(readBody(transport.request).contains("\"collection_name\":\"test_collection\""));
+        assertTrue(readBody(transport.request).contains("\"content\":\"hello\""));
+    }
+
+    @Test
+    void addSession_withApiKeyFailure_returnsFalse() throws Exception {
+        CapturingTransport transport = new CapturingTransport(403, "{\"message\":\"forbidden\"}");
+        VikingMemoryWrapper wrapper = new VikingMemoryWrapper(null, null, "api-key", transport);
+
+        assertFalse(
+                wrapper.addSession(
+                        "test_collection",
+                        Collections.singletonList(new Message("user", "hello")),
+                        new Metadata("u1", "a1", 1L)));
+    }
+
+    @Test
+    void searchMemory_withApiKeyFailure_returnsEmptyList() throws Exception {
+        CapturingTransport transport =
+                new CapturingTransport(401, "{\"message\":\"unauthorized\"}");
+        VikingMemoryWrapper wrapper = new VikingMemoryWrapper(null, null, "api-key", transport);
+
+        List<com.google.adk.memory.MemoryEntry> result =
+                wrapper.searchMemory(
+                        "test_collection",
+                        "user-1",
+                        "query",
+                        2,
+                        Collections.singletonList("sys_event_v1"));
+
+        assertTrue(result.isEmpty());
+    }
+
+    @Test
+    void searchMemory_withApiKeyInterrupted_throwsAndRestoresInterrupt() {
+        VikingMemoryWrapper wrapper =
+                new VikingMemoryWrapper(null, null, "api-key", new InterruptingTransport());
+
+        try {
+            assertThrows(
+                    IOException.class,
+                    () ->
+                            wrapper.searchMemory(
+                                    "test_collection",
+                                    "user-1",
+                                    "query",
+                                    2,
+                                    Collections.singletonList("sys_event_v1")));
+
+            assertTrue(Thread.currentThread().isInterrupted());
+        } finally {
+            Thread.interrupted();
+        }
+    }
+
+    private static String readBody(HttpRequest request) throws Exception {
+        Optional<HttpRequest.BodyPublisher> publisher = request.bodyPublisher();
+        if (publisher.isEmpty()) {
+            return "";
+        }
+        BodyCaptureSubscriber subscriber = new BodyCaptureSubscriber();
+        publisher.get().subscribe(subscriber);
+        return subscriber.getBody();
+    }
+
+    private static class CapturingTransport implements VikingMemoryWrapper.VikingHttpTransport {
+        private final int statusCode;
+        private final String body;
+        private HttpRequest request;
+
+        private CapturingTransport(int statusCode, String body) {
+            this.statusCode = statusCode;
+            this.body = body;
+        }
+
+        @Override
+        public VikingMemoryWrapper.VikingHttpResponse send(HttpRequest request) {
+            this.request = request;
+            return new VikingMemoryWrapper.VikingHttpResponse(statusCode, body);
+        }
+    }
+
+    private static class InterruptingTransport implements VikingMemoryWrapper.VikingHttpTransport {
+
+        @Override
+        public VikingMemoryWrapper.VikingHttpResponse send(HttpRequest request)
+                throws InterruptedException {
+            throw new InterruptedException("interrupted");
+        }
+    }
+
+    private static class BodyCaptureSubscriber implements Flow.Subscriber<ByteBuffer> {
+        private final ByteArrayOutputStream output = new ByteArrayOutputStream();
+        private final CountDownLatch done = new CountDownLatch(1);
+        private Throwable error;
+
+        @Override
+        public void onSubscribe(Flow.Subscription subscription) {
+            subscription.request(Long.MAX_VALUE);
+        }
+
+        @Override
+        public void onNext(ByteBuffer item) {
+            byte[] bytes = new byte[item.remaining()];
+            item.get(bytes);
+            try {
+                output.write(bytes);
+            } catch (IOException e) {
+                error = e;
+            }
+        }
+
+        @Override
+        public void onError(Throwable throwable) {
+            error = throwable;
+            done.countDown();
+        }
+
+        @Override
+        public void onComplete() {
+            done.countDown();
+        }
+
+        private String getBody() throws Exception {
+            done.await(5, TimeUnit.SECONDS);
+            if (error != null) {
+                throw new IOException(error);
+            }
+            return output.toString(StandardCharsets.UTF_8);
+        }
     }
 }

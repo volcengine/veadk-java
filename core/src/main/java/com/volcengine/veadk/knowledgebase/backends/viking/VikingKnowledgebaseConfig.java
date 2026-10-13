@@ -24,23 +24,43 @@ public class VikingKnowledgebaseConfig {
 
     private final String accessKey;
     private final String secretKey;
+    private final String apiKey;
     private final boolean rerank;
     private final int chunkDiffusionCount;
 
     public VikingKnowledgebaseConfig(
             String accessKey, String secretKey, boolean rerank, int chunkDiffusionCount) {
+        this(accessKey, secretKey, null, rerank, chunkDiffusionCount);
+    }
+
+    public VikingKnowledgebaseConfig(
+            String accessKey,
+            String secretKey,
+            String apiKey,
+            boolean rerank,
+            int chunkDiffusionCount) {
         this.accessKey = accessKey;
         this.secretKey = secretKey;
+        this.apiKey = EnvUtil.sanitizeApiKey(apiKey);
         this.rerank = rerank;
         this.chunkDiffusionCount = chunkDiffusionCount;
     }
 
     public static VikingKnowledgebaseConfig fromEnv() {
+        return fromEnv(null);
+    }
+
+    public static VikingKnowledgebaseConfig fromEnv(String explicitApiKey) {
         return new VikingKnowledgebaseConfig(
-                EnvUtil.getAccessKey(),
-                EnvUtil.getSecretKey(),
+                EnvUtil.getOptionalAccessKey(),
+                EnvUtil.getOptionalSecretKey(),
+                EnvUtil.resolveApiKey(explicitApiKey, EnvUtil.getVikingKnowledgebaseApiKey()),
                 DEFAULT_RERANK,
                 DEFAULT_CHUNK_DIFFUSION_COUNT);
+    }
+
+    public static Builder builder() {
+        return new Builder();
     }
 
     public String getAccessKey() {
@@ -51,11 +71,61 @@ public class VikingKnowledgebaseConfig {
         return secretKey;
     }
 
+    public String getApiKey() {
+        return apiKey;
+    }
+
     public boolean isRerank() {
         return rerank;
     }
 
     public int getChunkDiffusionCount() {
         return chunkDiffusionCount;
+    }
+
+    public boolean hasApiKey() {
+        return apiKey != null;
+    }
+
+    public boolean hasManagementCredentials() {
+        return accessKey != null && secretKey != null;
+    }
+
+    public static class Builder {
+        private String accessKey;
+        private String secretKey;
+        private String apiKey;
+        private boolean rerank = DEFAULT_RERANK;
+        private int chunkDiffusionCount = DEFAULT_CHUNK_DIFFUSION_COUNT;
+
+        public Builder accessKey(String accessKey) {
+            this.accessKey = accessKey;
+            return this;
+        }
+
+        public Builder secretKey(String secretKey) {
+            this.secretKey = secretKey;
+            return this;
+        }
+
+        public Builder apiKey(String apiKey) {
+            this.apiKey = apiKey;
+            return this;
+        }
+
+        public Builder rerank(boolean rerank) {
+            this.rerank = rerank;
+            return this;
+        }
+
+        public Builder chunkDiffusionCount(int chunkDiffusionCount) {
+            this.chunkDiffusionCount = chunkDiffusionCount;
+            return this;
+        }
+
+        public VikingKnowledgebaseConfig build() {
+            return new VikingKnowledgebaseConfig(
+                    accessKey, secretKey, apiKey, rerank, chunkDiffusionCount);
+        }
     }
 }
