@@ -21,13 +21,18 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.google.adk.models.LlmRequest;
 import com.google.adk.skills.SkillSourceException;
+import com.google.adk.tools.ToolContext;
+import com.google.adk.tools.skills.SkillToolset;
 import com.google.common.collect.ImmutableList;
 import com.google.common.io.ByteSource;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -72,6 +77,43 @@ class VeSkillSourceTest {
         assertThat(frontmatters.get("alpha-skill").description()).isEqualTo("Alpha skill.");
         assertThat(frontmatters.get("beta-skill").description())
                 .isEqualTo("Remote skill beta-skill");
+    }
+
+    @Test
+    void nextLlmRequestRefreshesRemoteSkillMetadata() {
+        AtomicReference<String> description = new AtomicReference<>("First description.");
+        AgentKitSkillClient client = mock(AgentKitSkillClient.class);
+        when(client.listSkills("ss-test"))
+                .thenAnswer(
+                        ignored ->
+                                List.of(
+                                        new RemoteSkill(
+                                                "alpha-skill",
+                                                description.get(),
+                                                ALPHA.path(),
+                                                ALPHA.skillSourceId(),
+                                                ALPHA.bucketName().orElse(null),
+                                                ALPHA.id().orElse(null),
+                                                ALPHA.slug().orElse(null),
+                                                ALPHA.sourceType().orElse(null),
+                                                ALPHA.versionId().orElse(null))));
+        SkillToolset toolset =
+                new SkillToolset(
+                        VeSkillSource.builder().skillSourceId("ss-test").client(client).build());
+
+        LlmRequest.Builder firstRequest = LlmRequest.builder().contents(List.of()).tools(Map.of());
+        toolset.processLlmRequest(firstRequest, mock(ToolContext.class)).blockingAwait();
+        description.set("Second description.");
+        LlmRequest.Builder secondRequest = LlmRequest.builder().contents(List.of()).tools(Map.of());
+        toolset.processLlmRequest(secondRequest, mock(ToolContext.class)).blockingAwait();
+
+        assertThat(firstRequest.build().getSystemInstructions().toString())
+                .contains("First description.")
+                .doesNotContain("Second description.");
+        assertThat(secondRequest.build().getSystemInstructions().toString())
+                .contains("Second description.")
+                .doesNotContain("First description.");
+        verify(client, org.mockito.Mockito.times(2)).listSkills("ss-test");
     }
 
     @Test

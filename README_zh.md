@@ -190,6 +190,10 @@ Agent agent = Agent.builder()
     .build();
 ```
 
+`SkillToolset` 会在每次 LLM 请求时重新读取 source 元信息，因此本地文件变化、远端
+元信息或版本变化会在下一次请求中生效，无需重建 Agent。刷新失败会直接返回给本次请求，
+不会静默复用过期元信息。
+
 如果要委托 Skills Sandbox 执行，传入 AgentKit Skill Space ID，并只暴露 `execute_skills`
 工具：
 
@@ -217,6 +221,31 @@ Sandbox 工具调用失败时会返回结构化错误。Agent 可以读取 `erro
   }
 }
 ```
+
+#### MCP Router
+
+`McpRouterToolset` 通过 ADK Java 的 Streamable HTTP MCP 客户端接入火山引擎 MCP
+Router，并把 Router 聚合的工具暴露给 Agent：
+
+```java
+import com.volcengine.veadk.tools.builtin.mcp.McpRouterToolset;
+
+Agent agent = Agent.builder()
+    .name("mcp-router-agent")
+    .tools(McpRouterToolset.create())
+    .build();
+
+try {
+    new Runner(agent).run("调用天气工具查询北京天气。");
+} finally {
+    agent.close().blockingAwait();
+}
+```
+
+使用 `TOOL_MCP_ROUTER_URL` 配置 Router 地址；可选的
+`TOOL_MCP_ROUTER_API_KEY` 会作为 Bearer Token 发送。只希望暴露部分工具时，可调用
+`McpRouterToolset.create(url, apiKey, allowedToolNames)`。关闭 Agent 时会同步关闭 MCP
+会话。
 
 #### 短期记忆
 

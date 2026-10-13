@@ -29,6 +29,7 @@ import com.google.adk.models.LlmResponse;
 import com.google.adk.skills.ClassPathSkillSource;
 import com.google.adk.skills.LocalSkillSource;
 import com.google.adk.tools.BaseTool;
+import com.google.adk.tools.BaseToolset;
 import com.google.adk.tools.LoadMemoryTool;
 import com.google.adk.tools.ToolContext;
 import com.google.adk.tools.skills.SkillToolset;
@@ -473,6 +474,21 @@ class AgentTest {
     }
 
     @Test
+    void closeClosesExplicitToolsets() {
+        CloseableTestToolset toolset = new CloseableTestToolset();
+        Agent agent =
+                Agent.builder()
+                        .name("closeable_toolset_agent")
+                        .model(new TestLlm("closeable-toolset-model"))
+                        .tools(toolset)
+                        .build();
+
+        agent.close().blockingAwait();
+
+        assertThat(toolset.closed()).isTrue();
+    }
+
+    @Test
     void localSkillDirectoryMountsSkillToolset(@TempDir Path tempDir) throws IOException {
         Path skillDir =
                 writeSkill(
@@ -907,6 +923,24 @@ class AgentTest {
         public Single<Map<String, Object>> runAsync(
                 Map<String, Object> args, ToolContext toolContext) {
             return Single.just(Map.of());
+        }
+
+        @Override
+        public void close() {
+            closed = true;
+        }
+
+        private boolean closed() {
+            return closed;
+        }
+    }
+
+    private static final class CloseableTestToolset implements BaseToolset {
+        private boolean closed;
+
+        @Override
+        public Flowable<BaseTool> getTools(com.google.adk.agents.ReadonlyContext readonlyContext) {
+            return Flowable.empty();
         }
 
         @Override

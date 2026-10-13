@@ -90,6 +90,26 @@ class EnvUtilTest {
     }
 
     @Test
+    @SetEnvironmentVariable(key = "TOOL_MCP_ROUTER_URL", value = " https://router.test/mcp ")
+    void getMcpRouterUrl() {
+        assertThat(EnvUtil.getMcpRouterUrl()).isEqualTo("https://router.test/mcp");
+    }
+
+    @Test
+    @ClearEnvironmentVariable(key = "TOOL_MCP_ROUTER_URL")
+    void getMcpRouterUrl_withMissingEnv_shouldThrowException() {
+        assertThatThrownBy(EnvUtil::getMcpRouterUrl)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("TOOL_MCP_ROUTER_URL");
+    }
+
+    @Test
+    @SetEnvironmentVariable(key = "TOOL_MCP_ROUTER_API_KEY", value = "router-key")
+    void getOptionalMcpRouterApiKey() {
+        assertThat(EnvUtil.getOptionalMcpRouterApiKey()).isEqualTo("router-key");
+    }
+
+    @Test
     @ClearEnvironmentVariable(key = "CLOUD_PROVIDER")
     @ClearEnvironmentVariable(key = "VOLCENGINE_AGENTKIT_HOST")
     @ClearEnvironmentVariable(key = "VOLC_AGENTKIT_HOST")

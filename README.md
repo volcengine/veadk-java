@@ -200,6 +200,11 @@ Agent agent = Agent.builder()
     .build();
 ```
 
+`SkillToolset` reads the source metadata for every LLM request. Local file changes
+and remote metadata/version changes therefore become visible on the next request
+without rebuilding the agent. A refresh failure is returned to that request
+instead of silently reusing stale metadata.
+
 For Skills Sandbox delegation, configure an AgentKit Skill Space ID and expose
 only the `execute_skills` tool:
 
@@ -228,6 +233,31 @@ explain the failure or decide whether to retry:
   }
 }
 ```
+
+#### MCP Router
+
+`McpRouterToolset` exposes tools aggregated by Volcengine MCP Router through ADK
+Java's streamable HTTP MCP client:
+
+```java
+import com.volcengine.veadk.tools.builtin.mcp.McpRouterToolset;
+
+Agent agent = Agent.builder()
+    .name("mcp-router-agent")
+    .tools(McpRouterToolset.create())
+    .build();
+
+try {
+    new Runner(agent).run("Use the weather tool to check Beijing.");
+} finally {
+    agent.close().blockingAwait();
+}
+```
+
+Set `TOOL_MCP_ROUTER_URL` to the Router endpoint. Optionally set
+`TOOL_MCP_ROUTER_API_KEY`; it is sent as a Bearer token. To expose only selected
+Router tools, use `McpRouterToolset.create(url, apiKey, allowedToolNames)`. Closing
+the agent closes the MCP session.
 
 #### Short-Term Memory
 

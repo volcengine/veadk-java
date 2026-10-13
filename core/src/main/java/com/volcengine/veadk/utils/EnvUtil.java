@@ -34,6 +34,8 @@ public class EnvUtil {
     private static final String VOLCENGINE_SESSION_TOKEN = "VOLCENGINE_SESSION_TOKEN";
     private static final String VOLC_SESSIONTOKEN = "VOLC_SESSIONTOKEN";
     private static final String TOOL_CODE_SANDBOX_URL = "TOOL_CODE_SANDBOX_URL";
+    private static final String TOOL_MCP_ROUTER_URL = "TOOL_MCP_ROUTER_URL";
+    private static final String TOOL_MCP_ROUTER_API_KEY = "TOOL_MCP_ROUTER_API_KEY";
     private static final String AGENTKIT_TOOL_ID = "AGENTKIT_TOOL_ID";
     private static final String AGENTKIT_TOOL_ID_SKILLS = "AGENTKIT_TOOL_ID_SKILLS";
     private static final String AGENTKIT_TOOL_SERVICE = "AGENTKIT_TOOL_SERVICE_CODE";
@@ -302,6 +304,18 @@ public class EnvUtil {
             throw getIllegalStateException(TOOL_CODE_SANDBOX_URL);
         }
         return url;
+    }
+
+    public static String getMcpRouterUrl() {
+        String url = System.getenv(TOOL_MCP_ROUTER_URL);
+        if (StringUtils.isBlank(url)) {
+            throw getIllegalStateException(TOOL_MCP_ROUTER_URL);
+        }
+        return url.trim();
+    }
+
+    public static String getOptionalMcpRouterApiKey() {
+        return StringUtils.trimToEmpty(System.getenv(TOOL_MCP_ROUTER_API_KEY));
     }
 
     private static IllegalStateException getIllegalStateException(String configName) {
