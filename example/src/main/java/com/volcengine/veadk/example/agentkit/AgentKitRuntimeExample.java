@@ -17,24 +17,32 @@ package com.volcengine.veadk.example.agentkit;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.google.adk.agents.LlmAgent;
+import com.google.adk.agents.BaseAgent;
+import com.google.adk.agents.RunConfig;
+import com.google.adk.events.Event;
+import com.google.genai.types.Content;
+import com.google.genai.types.Part;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import com.volcengine.veadk.Runner;
-import com.volcengine.veadk.model.ArkLlm;
+import io.reactivex.rxjava3.disposables.Disposable;
 import java.io.IOException;
 import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.Objects;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.SynchronousQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Function;
 
-/** Minimal stateless JSON application implementing AgentKit Simple App HTTP routes. */
+/** AgentKit Simple App HTTP runtime with user-scoped sessions and optional SSE. */
 public final class AgentKitRuntimeExample implements AutoCloseable {
     static final int MAX_REQUEST_BYTES = 1024 * 1024;
     private static final ObjectMapper JSON = new ObjectMapper();
@@ -43,10 +51,36 @@ public final class AgentKitRuntimeExample implements AutoCloseable {
     private final ExecutorService invocations =
             new ThreadPoolExecutor(4, 4, 0L, TimeUnit.MILLISECONDS, new SynchronousQueue<>());
     private final Function<String, String> invoke;
+    private final Runner runner;
+    private final boolean streaming;
+    private final ConcurrentHashMap<SessionKey, Boolean> activeSessions = new ConcurrentHashMap<>();
+    private final AtomicBoolean closed = new AtomicBoolean();
+
+    private record SessionKey(String userId, String sessionId) {}
 
     public AgentKitRuntimeExample(InetSocketAddress address, Function<String, String> invoke)
             throws IOException {
-        this.invoke = Objects.requireNonNull(invoke, "invoke must be set");
+        this(address, Objects.requireNonNull(invoke, "invoke must be set"), null, false);
+    }
+
+    public AgentKitRuntimeExample(InetSocketAddress address, BaseAgent agent, boolean streaming)
+            throws IOException {
+        this(
+                address,
+                null,
+                new Runner(Objects.requireNonNull(agent, "agent must be set")),
+                streaming);
+    }
+
+    private AgentKitRuntimeExample(
+            InetSocketAddress address,
+            Function<String, String> invoke,
+            Runner runner,
+            boolean streaming)
+            throws IOException {
+        this.invoke = invoke;
+        this.runner = runner;
+        this.streaming = streaming;
         server = HttpServer.create(address, 16);
         server.setExecutor(executor);
         server.createContext("/", this::handle);
@@ -135,16 +169,104 @@ public final class AgentKitRuntimeExample implements AutoCloseable {
                         "Expected a JSON object with a non-empty prompt string");
                 return;
             }
-            String result;
-            try {
-                result = invoke.apply(payload.get("prompt").asText());
-            } catch (RuntimeException failure) {
-                // Do not return exception details, prompts or credentials to callers.
-                error(exchange, 500, "InvocationError", "Agent invocation failed");
+            String prompt = payload.get("prompt").asText();
+            if (runner == null) {
+                try {
+                    send(exchange, 200, invoke.apply(prompt));
+                } catch (RuntimeException failure) {
+                    error(exchange, 500, "InvocationError", "Agent invocation failed");
+                }
                 return;
             }
-            // AgentKit Simple App serializes the entrypoint return value as JSON.
-            send(exchange, 200, result);
+            SessionKey key;
+            try {
+                key =
+                        new SessionKey(
+                                contextHeader(exchange, "user_id", "agentkit_user"),
+                                contextHeader(
+                                        exchange, "session_id", UUID.randomUUID().toString()));
+            } catch (IllegalArgumentException invalid) {
+                error(exchange, 400, "BadRequest", "Invalid user_id or session_id header");
+                return;
+            }
+            if (activeSessions.putIfAbsent(key, Boolean.TRUE) != null) {
+                error(exchange, 409, "SessionBusy", "Another invocation is using this session");
+                return;
+            }
+            try {
+                try {
+                    runner.shortTermMemory()
+                            .createSession(runner.appName(), key.userId(), key.sessionId())
+                            .blockingGet();
+                } catch (RuntimeException failure) {
+                    error(exchange, 500, "InvocationError", "Could not initialize session");
+                    return;
+                }
+                if (streaming) {
+                    stream(exchange, key, prompt);
+                } else {
+                    try {
+                        send(
+                                exchange,
+                                200,
+                                runner.run(
+                                        key.userId(),
+                                        key.sessionId(),
+                                        prompt,
+                                        RunConfig.builder().autoCreateSession(false).build()));
+                    } catch (RuntimeException failure) {
+                        error(exchange, 500, "InvocationError", "Agent invocation failed");
+                    }
+                }
+            } finally {
+                activeSessions.remove(key);
+            }
+        }
+    }
+
+    private static String contextHeader(HttpExchange exchange, String name, String fallback) {
+        var values = exchange.getRequestHeaders().get(name);
+        if (values == null) return fallback;
+        if (values.size() != 1 || !values.get(0).matches("[A-Za-z0-9][A-Za-z0-9._:-]{0,127}")) {
+            throw new IllegalArgumentException("Invalid context header");
+        }
+        return values.get(0);
+    }
+
+    private void stream(HttpExchange exchange, SessionKey key, String prompt) throws IOException {
+        exchange.getResponseHeaders().set("Content-Type", "text/event-stream; charset=utf-8");
+        exchange.getResponseHeaders().set("Cache-Control", "no-cache");
+        exchange.sendResponseHeaders(200, 0);
+        var output = exchange.getResponseBody();
+        output.write(": connected\n\n".getBytes(StandardCharsets.UTF_8));
+        output.flush();
+        java.util.Iterator<Event> events = null;
+        try {
+            events =
+                    runner.runAsync(
+                                    key.userId(),
+                                    key.sessionId(),
+                                    Content.fromParts(Part.fromText(prompt)),
+                                    RunConfig.builder()
+                                            .streamingMode(RunConfig.StreamingMode.SSE)
+                                            .build())
+                            .timeout(120, TimeUnit.SECONDS)
+                            .blockingIterable(1)
+                            .iterator();
+            while (events.hasNext()) {
+                Event event = events.next();
+                output.write(("data: " + event.toJson() + "\n\n").getBytes(StandardCharsets.UTF_8));
+                output.flush();
+            }
+        } catch (RuntimeException failure) {
+            output.write(
+                    "event: error\ndata: {\"error\":{\"type\":\"InvocationError\",\"message\":\"Agent invocation failed\"}}\n\n"
+                            .getBytes(StandardCharsets.UTF_8));
+            output.flush();
+        } finally {
+            // RxJava's blocking Flowable iterator is Disposable; closing the HTTP stream
+            // cancels the upstream model subscription instead of leaving work running.
+            if (events instanceof Disposable subscription) subscription.dispose();
         }
     }
 
@@ -169,35 +291,25 @@ public final class AgentKitRuntimeExample implements AutoCloseable {
 
     @Override
     public void close() {
+        if (!closed.compareAndSet(false, true)) return;
         server.stop(1);
         executor.shutdownNow();
         invocations.shutdownNow();
     }
 
     public static void main(String[] args) throws IOException {
-        String modelId = System.getenv("MODEL_AGENT_NAME");
-        if (modelId == null || modelId.isBlank()) {
-            throw new IllegalArgumentException(
-                    "Set MODEL_AGENT_NAME to an accessible Ark model ID");
-        }
+        var configured = AgentKitAgentConfiguration.fromEnvironment(System.getenv());
         String bind = System.getenv().getOrDefault("AGENTKIT_BIND_HOST", "127.0.0.1");
         int port = Integer.parseInt(System.getenv().getOrDefault("PORT", "8000"));
-        ArkLlm model = new ArkLlm(modelId);
-        LlmAgent agent =
-                LlmAgent.builder()
-                        .name("agentkit_java_example")
-                        .model(model)
-                        .instruction("Answer the user's question concisely.")
-                        .build();
+        boolean streaming =
+                Boolean.parseBoolean(System.getenv().getOrDefault("AGENTKIT_STREAMING", "false"));
         AgentKitRuntimeExample app;
         try {
-            // A fresh Runner owns request-local in-memory sessions; no cross-request history.
             app =
                     new AgentKitRuntimeExample(
-                            new InetSocketAddress(bind, port),
-                            prompt -> new Runner(agent).run(prompt));
+                            new InetSocketAddress(bind, port), configured.agent(), streaming);
         } catch (IOException | RuntimeException failure) {
-            model.close();
+            configured.close();
             throw failure;
         }
         Runtime.getRuntime()
@@ -205,7 +317,7 @@ public final class AgentKitRuntimeExample implements AutoCloseable {
                         new Thread(
                                 () -> {
                                     app.close();
-                                    model.close();
+                                    configured.close();
                                 }));
         app.start();
         System.out.println("AgentKit Java example listening on " + bind + ":" + app.port());
