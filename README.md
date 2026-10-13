@@ -239,7 +239,10 @@ import com.volcengine.veadk.Agent;
 import com.volcengine.veadk.Runner;
 import com.volcengine.veadk.memory.ShortTermMemory;
 
-ShortTermMemory shortTermMemory = ShortTermMemory.builder().local().build();
+ShortTermMemory shortTermMemory = ShortTermMemory.builder()
+    .local()
+    .numRecentInvocationsToKeep(3)
+    .build();
 
 Agent agent = Agent.builder()
     .name("memory_agent")
@@ -252,6 +255,24 @@ Runner runner = new Runner(agent, "memory_demo");
 
 runner.run("user_1", "session_1", "My name is Ming.");
 runner.run("user_1", "session_1", "What is my name?");
+```
+
+`numRecentInvocationsToKeep(...)` limits only the history sent in each model
+request. The session service still stores the complete event history, and the
+window keeps tool calls together with their responses.
+
+Mem0 saves are asynchronous by default. Completion means that Mem0 accepted
+the request; the new memory may not be immediately searchable. Use synchronous
+mode when the next operation must wait for Mem0 request processing. Exact search
+visibility still follows the consistency guarantees of the configured service:
+
+```java
+import com.volcengine.veadk.memory.mem0.Mem0MemoryService;
+
+Mem0MemoryService memoryService = Mem0MemoryService.builder()
+    .appName("memory_agent")
+    .writeMode(Mem0MemoryService.WriteMode.SYNCHRONOUS)
+    .build();
 ```
 
 The extracted metadata includes:

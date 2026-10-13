@@ -21,6 +21,8 @@ import com.google.adk.artifacts.InMemoryArtifactService;
 import com.google.adk.events.Event;
 import com.google.adk.memory.BaseMemoryService;
 import com.google.adk.memory.InMemoryMemoryService;
+import com.google.adk.plugins.ContextFilterPlugin;
+import com.google.adk.plugins.Plugin;
 import com.google.adk.sessions.BaseSessionService;
 import com.google.adk.sessions.Session;
 import com.google.common.collect.ImmutableList;
@@ -98,8 +100,20 @@ public class Runner extends com.google.adk.runner.Runner {
                 new InMemoryArtifactService(),
                 services.shortTermMemory().sessionService(),
                 services.memoryService(),
-                ImmutableList.of());
+                contextPlugins(services.shortTermMemory()));
         this.shortTermMemory = services.shortTermMemory();
+    }
+
+    private static List<? extends Plugin> contextPlugins(ShortTermMemory shortTermMemory) {
+        if (shortTermMemory.numRecentInvocationsToKeep().isEmpty()) {
+            return ImmutableList.of();
+        }
+        return ImmutableList.of(
+                ContextFilterPlugin.builder()
+                        .name("veadk_recent_context")
+                        .numInvocationsToKeep(
+                                shortTermMemory.numRecentInvocationsToKeep().getAsInt())
+                        .build());
     }
 
     public ShortTermMemory shortTermMemory() {

@@ -57,6 +57,11 @@ public class Mem0RuntimeClient {
     }
 
     public boolean addMemory(String userId, List<Mem0Message> messages) throws IOException {
+        return addMemory(userId, messages, true);
+    }
+
+    public boolean addMemory(String userId, List<Mem0Message> messages, boolean asyncMode)
+            throws IOException {
         if (messages == null || messages.isEmpty()) {
             return true;
         }
@@ -64,7 +69,7 @@ public class Mem0RuntimeClient {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("messages", messages);
         body.put("user_id", userId);
-        body.put("async_mode", true);
+        body.put("async_mode", asyncMode);
         body.put("output_format", OUTPUT_FORMAT);
 
         RuntimeHttpResponse response = post(ADD_MEMORY_PATH, body);

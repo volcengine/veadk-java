@@ -34,7 +34,8 @@ class Mem0MemoryServiceTest {
     @Test
     void addSessionToMemory_shouldStoreOnlyUserTextMessages() throws Exception {
         Mem0RuntimeClient runtimeClient = Mockito.mock(Mem0RuntimeClient.class);
-        when(runtimeClient.addMemory(Mockito.eq("user-1"), Mockito.anyList())).thenReturn(true);
+        when(runtimeClient.addMemory(Mockito.eq("user-1"), Mockito.anyList(), Mockito.eq(true)))
+                .thenReturn(true);
         Mem0MemoryService service =
                 Mem0MemoryService.builder().appName("AppMem").runtimeClient(runtimeClient).build();
 
@@ -62,13 +63,73 @@ class Mem0MemoryServiceTest {
         service.addSessionToMemory(session).blockingAwait();
 
         ArgumentCaptor<List> messagesCaptor = ArgumentCaptor.forClass(List.class);
-        verify(runtimeClient).addMemory(Mockito.eq("user-1"), messagesCaptor.capture());
+        verify(runtimeClient)
+                .addMemory(Mockito.eq("user-1"), messagesCaptor.capture(), Mockito.eq(true));
 
         @SuppressWarnings("unchecked")
         List<Mem0Message> messages = messagesCaptor.getValue();
         assertThat(messages).hasSize(1);
         assertThat(messages.get(0).getRole()).isEqualTo("user");
         assertThat(messages.get(0).getContent()).isEqualTo("hello\nworld");
+    }
+
+    @Test
+    void synchronousWriteMode_waitsForSynchronousMem0Request() throws Exception {
+        Mem0RuntimeClient runtimeClient = Mockito.mock(Mem0RuntimeClient.class);
+        when(runtimeClient.addMemory(Mockito.eq("user-1"), Mockito.anyList(), Mockito.eq(false)))
+                .thenReturn(true);
+        Mem0MemoryService service =
+                Mem0MemoryService.builder()
+                        .appName("AppMem")
+                        .writeMode(Mem0MemoryService.WriteMode.SYNCHRONOUS)
+                        .runtimeClient(runtimeClient)
+                        .build();
+        Event userEvent = Mockito.mock(Event.class);
+        when(userEvent.author()).thenReturn("user");
+        when(userEvent.content())
+                .thenReturn(
+                        Optional.of(
+                                Content.builder()
+                                        .role("user")
+                                        .parts(Part.fromText("remember me"))
+                                        .build()));
+        Session session = Mockito.mock(Session.class);
+        when(session.userId()).thenReturn("user-1");
+        when(session.events()).thenReturn(List.of(userEvent));
+
+        service.addSessionToMemory(session).blockingAwait();
+
+        assertThat(service.writeMode()).isEqualTo(Mem0MemoryService.WriteMode.SYNCHRONOUS);
+        verify(runtimeClient).addMemory(Mockito.eq("user-1"), Mockito.anyList(), Mockito.eq(false));
+    }
+
+    @Test
+    void synchronousWriteFailure_propagatesToCaller() throws Exception {
+        Mem0RuntimeClient runtimeClient = Mockito.mock(Mem0RuntimeClient.class);
+        when(runtimeClient.addMemory(Mockito.eq("user-1"), Mockito.anyList(), Mockito.eq(false)))
+                .thenReturn(false);
+        Mem0MemoryService service =
+                Mem0MemoryService.builder()
+                        .appName("AppMem")
+                        .writeMode(Mem0MemoryService.WriteMode.SYNCHRONOUS)
+                        .runtimeClient(runtimeClient)
+                        .build();
+        Event userEvent = Mockito.mock(Event.class);
+        when(userEvent.author()).thenReturn("user");
+        when(userEvent.content())
+                .thenReturn(
+                        Optional.of(
+                                Content.builder()
+                                        .role("user")
+                                        .parts(Part.fromText("remember me"))
+                                        .build()));
+        Session session = Mockito.mock(Session.class);
+        when(session.userId()).thenReturn("user-1");
+        when(session.events()).thenReturn(List.of(userEvent));
+
+        assertThatThrownBy(() -> service.addSessionToMemory(session).blockingAwait())
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("Failed to add session to Mem0 memory");
     }
 
     @Test
@@ -87,7 +148,8 @@ class Mem0MemoryServiceTest {
 
         service.addSessionToMemory(session).blockingAwait();
 
-        verify(runtimeClient, never()).addMemory(Mockito.anyString(), Mockito.anyList());
+        verify(runtimeClient, never())
+                .addMemory(Mockito.anyString(), Mockito.anyList(), Mockito.anyBoolean());
     }
 
     @Test

@@ -228,7 +228,10 @@ import com.volcengine.veadk.Agent;
 import com.volcengine.veadk.Runner;
 import com.volcengine.veadk.memory.ShortTermMemory;
 
-ShortTermMemory shortTermMemory = ShortTermMemory.builder().local().build();
+ShortTermMemory shortTermMemory = ShortTermMemory.builder()
+    .local()
+    .numRecentInvocationsToKeep(3)
+    .build();
 
 Agent agent = Agent.builder()
     .name("memory_agent")
@@ -241,6 +244,22 @@ Runner runner = new Runner(agent, "memory_demo");
 
 runner.run("user_1", "session_1", "我叫小明。");
 runner.run("user_1", "session_1", "我叫什么？");
+```
+
+`numRecentInvocationsToKeep(...)` 只限制每次发送给模型的历史范围。会话服务仍会保存
+完整事件历史，并且窗口边界不会拆开工具调用及其响应。
+
+Mem0 默认异步保存：调用完成只表示 Mem0 已接受请求，新记忆不保证立即可检索。如果下一步
+操作必须等待 Mem0 完成请求处理，请使用同步模式；确切的可检索时间仍取决于所配置服务的
+一致性保证：
+
+```java
+import com.volcengine.veadk.memory.mem0.Mem0MemoryService;
+
+Mem0MemoryService memoryService = Mem0MemoryService.builder()
+    .appName("memory_agent")
+    .writeMode(Mem0MemoryService.WriteMode.SYNCHRONOUS)
+    .build();
 ```
 
 metadata 输出包含：

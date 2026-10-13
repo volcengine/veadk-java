@@ -36,6 +36,19 @@ class Mem0RuntimeClientTest {
     }
 
     @Test
+    void addMemory_supportsSynchronousWrite() throws Exception {
+        CapturingTransport transport = new CapturingTransport(200, "{\"ok\":true}");
+        Mem0RuntimeClient client =
+                new Mem0RuntimeClient("https://mem0.example.com", "key", transport);
+
+        boolean success =
+                client.addMemory("user-1", List.of(new Mem0Message("user", "hello")), false);
+
+        assertThat(success).isTrue();
+        assertThat(readBody(transport.request)).contains("\"async_mode\":false");
+    }
+
+    @Test
     void searchMemory_parsesResultsObject() throws Exception {
         CapturingTransport transport =
                 new CapturingTransport(

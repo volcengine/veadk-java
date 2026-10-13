@@ -53,6 +53,21 @@ class ShortTermMemoryTest {
     }
 
     @Test
+    void recentInvocationsConfiguresRequestContextWindow() {
+        ShortTermMemory memory =
+                ShortTermMemory.builder().local().numRecentInvocationsToKeep(3).build();
+
+        assertThat(memory.numRecentInvocationsToKeep()).hasValue(3);
+    }
+
+    @Test
+    void recentInvocationsRejectsNonPositiveWindow() {
+        assertThatThrownBy(() -> ShortTermMemory.builder().numRecentInvocationsToKeep(0))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("numRecentInvocationsToKeep must be greater than 0");
+    }
+
+    @Test
     void customSessionServiceIsUsed() {
         BaseSessionService sessionService = mock(BaseSessionService.class);
 

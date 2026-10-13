@@ -27,6 +27,7 @@ import io.reactivex.rxjava3.core.Single;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.stream.Collectors;
 import org.apache.commons.lang3.StringUtils;
@@ -42,6 +43,7 @@ public class Mem0MemoryService implements BaseMemoryService {
     private final String appName;
     private final String defaultUserId;
     private final int topK;
+    private final WriteMode writeMode;
     private final Mem0RuntimeClient runtimeClient;
 
     public Mem0MemoryService(String appName) {
@@ -56,6 +58,7 @@ public class Mem0MemoryService implements BaseMemoryService {
         this.appName = normalizeAppName(builder.appName);
         this.defaultUserId = StringUtils.defaultIfBlank(builder.defaultUserId, DEFAULT_USER_ID);
         this.topK = builder.topK > 0 ? builder.topK : 5;
+        this.writeMode = builder.writeMode;
 
         if (builder.runtimeClient != null) {
             this.runtimeClient = builder.runtimeClient;
@@ -73,6 +76,23 @@ public class Mem0MemoryService implements BaseMemoryService {
         return new Builder();
     }
 
+    /**
+     * Controls when a successful Mem0 save is considered complete.
+     *
+     * <p>{@link WriteMode#ASYNC} completes after Mem0 accepts the request; the new memory may not
+     * be immediately searchable. {@link WriteMode#SYNCHRONOUS} asks Mem0 to finish processing
+     * before the request returns. Exact search visibility still follows the consistency guarantees
+     * of the configured Mem0 service.
+     */
+    public enum WriteMode {
+        ASYNC,
+        SYNCHRONOUS
+    }
+
+    public WriteMode writeMode() {
+        return writeMode;
+    }
+
     @Override
     public Completable addSessionToMemory(Session session) {
         return Completable.fromAction(
@@ -82,7 +102,10 @@ public class Mem0MemoryService implements BaseMemoryService {
                         return;
                     }
                     boolean success =
-                            runtimeClient.addMemory(resolveUserId(session.userId()), messages);
+                            runtimeClient.addMemory(
+                                    resolveUserId(session.userId()),
+                                    messages,
+                                    writeMode == WriteMode.ASYNC);
                     if (!success) {
                         throw new IllegalStateException("Failed to add session to Mem0 memory.");
                     }
@@ -180,6 +203,7 @@ public class Mem0MemoryService implements BaseMemoryService {
         private String appName;
         private String defaultUserId;
         private int topK = 5;
+        private WriteMode writeMode = WriteMode.ASYNC;
         private Mem0Config config;
         private Mem0AuthClient authClient;
         private Mem0RuntimeClient runtimeClient;
@@ -201,6 +225,11 @@ public class Mem0MemoryService implements BaseMemoryService {
 
         public Builder topK(int topK) {
             this.topK = topK;
+            return this;
+        }
+
+        public Builder writeMode(WriteMode writeMode) {
+            this.writeMode = Objects.requireNonNull(writeMode, "writeMode must be set.");
             return this;
         }
 

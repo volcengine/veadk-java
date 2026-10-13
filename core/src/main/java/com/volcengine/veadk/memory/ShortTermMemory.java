@@ -25,6 +25,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.OptionalInt;
 import java.util.function.Consumer;
 import java.util.function.Function;
 
@@ -36,6 +37,7 @@ public final class ShortTermMemory {
     private final String dbUrl;
     private final String localDatabasePath;
     private final Map<String, Object> backendOptions;
+    private final Integer numRecentInvocationsToKeep;
     private final Consumer<Session> afterCreateSessionCallback;
     private final Consumer<Session> afterLoadMemoryCallback;
     private final Function<Session, Completable> afterCreateSessionCallbackAsync;
@@ -47,6 +49,7 @@ public final class ShortTermMemory {
         this.dbUrl = Objects.requireNonNullElse(builder.dbUrl, "");
         this.localDatabasePath = Objects.requireNonNullElse(builder.localDatabasePath, "");
         this.backendOptions = Map.copyOf(builder.backendOptions);
+        this.numRecentInvocationsToKeep = builder.numRecentInvocationsToKeep;
         this.afterCreateSessionCallback = builder.afterCreateSessionCallback;
         this.afterLoadMemoryCallback = builder.afterLoadMemoryCallback;
         this.afterCreateSessionCallbackAsync = builder.afterCreateSessionCallbackAsync;
@@ -79,6 +82,18 @@ public final class ShortTermMemory {
 
     public Map<String, Object> backendOptions() {
         return backendOptions;
+    }
+
+    /**
+     * Number of recent model invocations retained in each model request.
+     *
+     * <p>The session service still stores the complete event history. The runner applies this
+     * window only when constructing model context.
+     */
+    public OptionalInt numRecentInvocationsToKeep() {
+        return numRecentInvocationsToKeep == null
+                ? OptionalInt.empty()
+                : OptionalInt.of(numRecentInvocationsToKeep);
     }
 
     public Maybe<Session> getSession(String appName, String userId, String sessionId) {
@@ -184,6 +199,7 @@ public final class ShortTermMemory {
         private String dbUrl = "";
         private String localDatabasePath = DEFAULT_LOCAL_DATABASE_PATH;
         private Map<String, Object> backendOptions = new HashMap<>();
+        private Integer numRecentInvocationsToKeep;
         private Consumer<Session> afterCreateSessionCallback;
         private Consumer<Session> afterLoadMemoryCallback;
         private Function<Session, Completable> afterCreateSessionCallbackAsync;
@@ -255,6 +271,21 @@ public final class ShortTermMemory {
             this.backendOptions =
                     new HashMap<>(
                             Objects.requireNonNull(backendOptions, "backendOptions must be set."));
+            return this;
+        }
+
+        /**
+         * Retains the most recent model invocations when building each model request.
+         *
+         * <p>Tool calls and their responses are retained as a pair. Persistent session history is
+         * not deleted or rewritten.
+         */
+        public Builder numRecentInvocationsToKeep(int numRecentInvocationsToKeep) {
+            if (numRecentInvocationsToKeep <= 0) {
+                throw new IllegalArgumentException(
+                        "numRecentInvocationsToKeep must be greater than 0.");
+            }
+            this.numRecentInvocationsToKeep = numRecentInvocationsToKeep;
             return this;
         }
 
