@@ -1,0 +1,89 @@
+# Copyright (c) 2025 Beijing Volcano Engine Technology Co., Ltd. and/or its affiliates.
+# Licensed under the Apache License, Version 2.0 (the "License");
+
+name: Push Preview Image to Volcengine Container Registry
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: veadk-java-preview-image
+  cancel-in-progress: true
+
+jobs:
+  build-test-and-push:
+    if: github.repository == 'volcengine/veadk-java'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      # [UNVERIFIED: VECR repository provisioning and secret presence require repository-admin access.]
+      REGISTRY: veadk-cn-beijing.cr.volces.com
+      IMAGE_REPOSITORY: veadk-cn-beijing.cr.volces.com/veadk/veadk-java
+      LOCAL_IMAGE: veadk-java:preview-${{ github.sha }}
+
+    steps:
+      - name: Checkout source revision
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+
+      - name: Test checked-out revision
+        run: ./mvnw -B -ntp test
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build local smoke-test image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          load: true
+          platforms: linux/amd64
+          tags: ${{ env.LOCAL_IMAGE }}
+          build-args: |
+            VERSION=preview
+            REVISION=${{ github.sha }}
+            CHANNEL=preview
+          cache-from: type=gha,scope=veadk-java-preview
+          cache-to: type=gha,mode=max,scope=veadk-java-preview
+
+      - name: Smoke test image
+        run: |
+          set -euo pipefail
+          docker run --rm --entrypoint sh "$LOCAL_IMAGE" -c \
+            'test -s /opt/veadk/lib/veadk-java.jar && test -n "$(find /opt/veadk/lib -maxdepth 1 -name "*.jar" -print -quit)"'
+          docker run --rm "$LOCAL_IMAGE"
+
+      - name: Login to Volcengine Container Registry
+        run: |
+          echo "${{ secrets.VE_CR_PASSWORD }}" | \
+            docker login "$REGISTRY" \
+              --username "${{ secrets.VE_CR_USERNAME }}" \
+              --password-stdin
+
+      - name: Push preview image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          push: true
+          platforms: linux/amd64
+          tags: ${{ env.IMAGE_REPOSITORY }}:preview
+          build-args: |
+            VERSION=preview
+            REVISION=${{ github.sha }}
+            CHANNEL=preview
+          cache-from: type=gha,scope=veadk-java-preview
+          cache-to: type=gha,mode=max,scope=veadk-java-preview

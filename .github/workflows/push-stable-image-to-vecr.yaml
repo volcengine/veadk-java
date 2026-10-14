@@ -1,0 +1,125 @@
+# Copyright (c) 2025 Beijing Volcano Engine Technology Co., Ltd. and/or its affiliates.
+# Licensed under the Apache License, Version 2.0 (the "License");
+
+name: Push Stable Image to Volcengine Container Registry
+
+on:
+  push:
+    tags:
+      - 'v[0-9]*.[0-9]*.[0-9]*'
+      - '[0-9]*.[0-9]*.[0-9]*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to publish, for example v0.0.2
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: veadk-java-stable-image-${{ github.ref }}-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  build-test-and-push:
+    if: github.repository == 'volcengine/veadk-java'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      # [UNVERIFIED: VECR repository provisioning and secret presence require repository-admin access.]
+      REGISTRY: veadk-cn-beijing.cr.volces.com
+      IMAGE_REPOSITORY: veadk-cn-beijing.cr.volces.com/veadk/veadk-java
+
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+
+      - name: Validate immutable release tag
+        id: release
+        env:
+          RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$RELEASE_TAG" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Release tag must match vX.Y.Z or X.Y.Z: $RELEASE_TAG" >&2
+            exit 1
+          fi
+          tag_commit=$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")
+          head_commit=$(git rev-parse HEAD)
+          if [[ "$tag_commit" != "$head_commit" ]]; then
+            echo "Checked-out revision does not match release tag $RELEASE_TAG" >&2
+            exit 1
+          fi
+          project_version=$(./mvnw -q -DforceStdout help:evaluate -Dexpression=project.version)
+          if [[ "${RELEASE_TAG#v}" != "$project_version" ]]; then
+            echo "Release tag $RELEASE_TAG does not match Maven version $project_version" >&2
+            exit 1
+          fi
+          echo "tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+          echo "commit=$head_commit" >> "$GITHUB_OUTPUT"
+
+      - name: Test tagged revision
+        run: ./mvnw -B -ntp test
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build local smoke-test image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          load: true
+          platforms: linux/amd64
+          tags: veadk-java:stable-${{ steps.release.outputs.commit }}
+          build-args: |
+            VERSION=${{ steps.release.outputs.tag }}
+            REVISION=${{ steps.release.outputs.commit }}
+            CHANNEL=stable
+          cache-from: type=gha,scope=veadk-java-stable
+          cache-to: type=gha,mode=max,scope=veadk-java-stable
+
+      - name: Smoke test image
+        env:
+          LOCAL_IMAGE: veadk-java:stable-${{ steps.release.outputs.commit }}
+        run: |
+          set -euo pipefail
+          docker run --rm --entrypoint sh "$LOCAL_IMAGE" -c \
+            'test -s /opt/veadk/lib/veadk-java.jar && test -n "$(find /opt/veadk/lib -maxdepth 1 -name "*.jar" -print -quit)"'
+          docker run --rm "$LOCAL_IMAGE"
+
+      - name: Login to Volcengine Container Registry
+        run: |
+          echo "${{ secrets.VE_CR_PASSWORD }}" | \
+            docker login "$REGISTRY" \
+              --username "${{ secrets.VE_CR_USERNAME }}" \
+              --password-stdin
+
+      - name: Push version and latest images
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          push: true
+          platforms: linux/amd64
+          tags: |
+            ${{ env.IMAGE_REPOSITORY }}:${{ steps.release.outputs.tag }}
+            ${{ env.IMAGE_REPOSITORY }}:latest
+          build-args: |
+            VERSION=${{ steps.release.outputs.tag }}
+            REVISION=${{ steps.release.outputs.commit }}
+            CHANNEL=stable
+          cache-from: type=gha,scope=veadk-java-stable
+          cache-to: type=gha,mode=max,scope=veadk-java-stable

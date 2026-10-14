@@ -431,6 +431,12 @@ Run the Mem0 memory example:
 ## Related Projects
 - Python version and documentation: [veadk-python](https://github.com/volcengine/veadk-python).
 
+## Container image
+
+The official SDK base image contains the VeADK Java JAR and its runtime
+dependencies. See [Container image](docs/container-image.md) for release tags and
+usage.
+
 ## Supported Feature Scope
 
 The Java Agent provides a small, typed contract. It matches the Python package
