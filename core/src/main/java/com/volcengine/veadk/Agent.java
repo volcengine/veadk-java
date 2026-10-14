@@ -53,6 +53,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executor;
 
 /** VeADK Agent that keeps ADK Java's LlmAgent execution path. */
@@ -74,6 +75,7 @@ public final class Agent extends LlmAgent {
     private final String veadkModelName;
     private final AgentMetadataSnapshot metadataSnapshot;
     private final List<AutoCloseable> closeableTools;
+    private final CopyOnWriteArrayList<BaseAgent> runtimeSubAgents = new CopyOnWriteArrayList<>();
 
     private Agent(Builder builder) {
         super(builder);
@@ -118,6 +120,53 @@ public final class Agent extends LlmAgent {
         return metadataSnapshot;
     }
 
+    /** Registers a runtime-created sub-agent for ADK transfer and discovery. */
+    public void registerRuntimeSubAgent(BaseAgent subAgent) {
+        BaseAgent resolved = Objects.requireNonNull(subAgent, "subAgent must be set.");
+        if (resolved == this) {
+            throw new IllegalArgumentException("An agent cannot be its own sub-agent.");
+        }
+        if (findAgent(resolved.name()).isPresent()) {
+            throw new IllegalArgumentException(
+                    "A sub-agent named '" + resolved.name() + "' is already registered.");
+        }
+        if (resolved.parentAgent() != null) {
+            throw new IllegalArgumentException(
+                    "Sub-agent '" + resolved.name() + "' already belongs to another parent.");
+        }
+        attachRuntimeSubAgent(resolved, this);
+        runtimeSubAgents.add(resolved);
+    }
+
+    /** Removes and detaches one runtime-created sub-agent. */
+    public boolean unregisterRuntimeSubAgent(String name) {
+        BaseAgent existing =
+                runtimeSubAgents.stream()
+                        .filter(agent -> agent.name().equals(name))
+                        .findFirst()
+                        .orElse(null);
+        if (existing == null || !runtimeSubAgents.remove(existing)) {
+            return false;
+        }
+        attachRuntimeSubAgent(existing, null);
+        return true;
+    }
+
+    @Override
+    public List<? extends BaseAgent> subAgents() {
+        List<BaseAgent> combined = new ArrayList<>(super.subAgents());
+        combined.addAll(runtimeSubAgents);
+        return List.copyOf(combined);
+    }
+
+    @Override
+    public Optional<BaseAgent> findSubAgent(String name) {
+        return subAgents().stream()
+                .map(agent -> agent.findAgent(name))
+                .flatMap(Optional::stream)
+                .findFirst();
+    }
+
     @Override
     public Completable close() {
         Completable closeModel =
@@ -134,7 +183,10 @@ public final class Agent extends LlmAgent {
                         () ->
                                 closeableTools.forEach(
                                         closeable -> closeAutoCloseable(closeable, "tool")));
-        return Completable.mergeArray(super.close(), closeModel, closeTools);
+        Completable closeRuntimeSubAgents =
+                Completable.concat(runtimeSubAgents.stream().map(BaseAgent::close).toList())
+                        .doFinally(runtimeSubAgents::clear);
+        return Completable.mergeArray(super.close(), closeRuntimeSubAgents, closeModel, closeTools);
     }
 
     private static void closeAutoCloseable(AutoCloseable closeable, String resourceType) {
@@ -143,6 +195,19 @@ public final class Agent extends LlmAgent {
         } catch (Exception e) {
             throw new RuntimeException("Failed to close " + resourceType, e);
         }
+    }
+
+    private static void attachRuntimeSubAgent(BaseAgent child, Agent parent) {
+        if (child instanceof Agent agent) {
+            agent.parentAgent(parent);
+            return;
+        }
+        if (child instanceof RuntimeCompositeAgent composite) {
+            composite.attachTo(parent);
+            return;
+        }
+        throw new IllegalArgumentException(
+                "Runtime sub-agent must be a VeADK Agent or RuntimeCompositeAgent.");
     }
 
     /** Builder for {@link Agent}. */

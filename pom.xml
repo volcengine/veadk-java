@@ -58,7 +58,8 @@ limitations under the License.
         <maven.compiler.release>${java.version}</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 
-        <google.adk.version>1.9.0</google.adk.version>
+        <google.adk.version>1.11.0</google.adk.version>
+        <a2a.sdk.version>0.3.2.Final</a2a.sdk.version>
         <opentelemetry.version>1.62.0</opentelemetry.version>
         <ark.sdk.version>0.2.48</ark.sdk.version>
         <volc.sdk.version>1.0.250</volc.sdk.version>
@@ -111,6 +112,21 @@ limitations under the License.
                 <groupId>com.google.adk</groupId>
                 <artifactId>google-adk</artifactId>
                 <version>${google.adk.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.google.adk</groupId>
+                <artifactId>google-adk-a2a</artifactId>
+                <version>${google.adk.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.github.a2asdk</groupId>
+                <artifactId>a2a-java-sdk-client-transport-rest</artifactId>
+                <version>${a2a.sdk.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.github.a2asdk</groupId>
+                <artifactId>a2a-java-sdk-transport-rest</artifactId>
+                <version>${a2a.sdk.version}</version>
             </dependency>
             <!-- Ark Java SDK -->
             <dependency>

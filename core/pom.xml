@@ -30,6 +30,18 @@ limitations under the License.
     <dependencies>
         <dependency>
             <groupId>com.google.adk</groupId>
+            <artifactId>google-adk-a2a</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.github.a2asdk</groupId>
+            <artifactId>a2a-java-sdk-client-transport-rest</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.github.a2asdk</groupId>
+            <artifactId>a2a-java-sdk-transport-rest</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.google.adk</groupId>
             <artifactId>google-adk</artifactId>
         </dependency>
         <dependency>

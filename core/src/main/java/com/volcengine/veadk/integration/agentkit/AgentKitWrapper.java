@@ -38,6 +38,7 @@ public class AgentKitWrapper extends BaseServiceImpl implements AutoCloseable {
     private static final String ACTION_LIST_SKILLS_BY_SPACE_ID = "ListSkillsBySpaceId";
     private static final String ACTION_GEN_TEMP_TOS_OBJECT_DOWNLOAD_URL =
             "GenTempTosObjectDownloadUrl";
+    private static final String ACTION_SEARCH_AGENT_CARDS = "SearchAgentCards";
     private static final String API_VERSION = "2025-10-30";
     private static final int SESSION_PAGE_SIZE = 20;
     private static final long SESSION_READY_TIMEOUT_MILLIS = 120_000;
@@ -70,6 +71,7 @@ public class AgentKitWrapper extends BaseServiceImpl implements AutoCloseable {
                     put(ACTION_GET_SESSION, jsonPostApiInfo());
                     put(ACTION_LIST_SKILLS_BY_SPACE_ID, jsonPostApiInfo());
                     put(ACTION_GEN_TEMP_TOS_OBJECT_DOWNLOAD_URL, jsonPostApiInfo());
+                    put(ACTION_SEARCH_AGENT_CARDS, jsonPostApiInfo());
                 }
             };
 
@@ -269,6 +271,15 @@ public class AgentKitWrapper extends BaseServiceImpl implements AutoCloseable {
                                 new IllegalStateException(
                                         "AgentKit GenTempTosObjectDownloadUrl response is missing"
                                                 + " SignedUrl"));
+    }
+
+    /** Searches AgentKit's A2A registry and returns the Result object. */
+    public JsonNode searchAgentCards(String spaceId, String prompt, int topK) {
+        Map<String, Object> requestBody = new HashMap<>();
+        requestBody.put("SpaceId", requireText(spaceId, "spaceId must be set."));
+        requestBody.put("Prompt", requireText(prompt, "prompt must be set."));
+        requestBody.put("TopK", Math.max(1, Math.min(topK, 20)));
+        return invokeAction(ACTION_SEARCH_AGENT_CARDS, requestBody);
     }
 
     public JsonNode invokeTool(
