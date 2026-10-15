@@ -92,9 +92,14 @@ public class WebSearchWrapper extends BaseServiceImpl {
                     new BasicNameValuePair("Version", "2025-01-01"));
 
     public WebSearchWrapper(String accessKey, String secretKey) {
+        this(accessKey, secretKey, "");
+    }
+
+    public WebSearchWrapper(String accessKey, String secretKey, String sessionToken) {
         super(SERVICE_INFO, API_INFO_LIST);
         setAccessKey(accessKey);
         setSecretKey(secretKey);
+        setSessionToken(sessionToken);
     }
 
     public List<String> doWebSearch(String query) throws Exception {

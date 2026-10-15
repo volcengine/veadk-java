@@ -67,7 +67,7 @@ a stream with no further events times out after 120 seconds.
 | `MODEL_AGENT_NAME` | Required accessible Ark model ID for the built-in agent |
 | `MODEL_AGENT_API_KEY`, `MODEL_AGENT_API_BASE` | Model credentials and optional endpoint |
 | `AGENT_NAME`, `AGENT_DESCRIPTION`, `MODEL_AGENT_INSTRUCTION` | Agent metadata and instruction |
-| `AGENTKIT_TOOLS` | Comma-separated `web_search,run_code`; unsupported names fail startup |
+| `AGENTKIT_TOOLS` | Comma-separated `web_search,web_fetch,run_code`; unsupported names fail startup |
 | `AGENTKIT_STREAMING` | `true` enables SSE in the basic runtime |
 | `AGENTKIT_AGENT_CLASS` | Existing class with `public static BaseAgent ROOT_AGENT` |
 | `AGENTKIT_BIND_HOST`, `PORT` | Bind address and port (container default: `0.0.0.0:8000`) |

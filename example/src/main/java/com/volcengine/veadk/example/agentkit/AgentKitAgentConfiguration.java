@@ -21,6 +21,7 @@ import com.volcengine.veadk.Agent;
 import com.volcengine.veadk.model.ArkLlm;
 import com.volcengine.veadk.model.ArkLlmConfig;
 import com.volcengine.veadk.tools.builtin.sandbox.RunCodeTool;
+import com.volcengine.veadk.tools.builtin.webfetch.WebFetchTool;
 import com.volcengine.veadk.tools.builtin.websearch.WebSearchTool;
 import java.lang.reflect.Modifier;
 import java.util.ArrayList;
@@ -56,8 +57,9 @@ public final class AgentKitAgentConfiguration implements AutoCloseable {
                         .filter(value -> !value.isEmpty())
                         .distinct()
                         .toList();
-        if (!Set.of("web_search", "run_code").containsAll(tools)) {
-            throw new IllegalArgumentException("Supported Java tools: web_search, run_code");
+        if (!Set.of("web_search", "web_fetch", "run_code").containsAll(tools)) {
+            throw new IllegalArgumentException(
+                    "Supported Java tools: web_search, web_fetch, run_code");
         }
         String modelName = env.get("MODEL_AGENT_NAME");
         if (modelName == null || modelName.isBlank()) {
@@ -86,6 +88,7 @@ public final class AgentKitAgentConfiguration implements AutoCloseable {
             var selectedTools = new ArrayList<BaseTool>();
             for (String tool : tools) {
                 if (tool.equals("web_search")) selectedTools.add(new WebSearchTool());
+                else if (tool.equals("web_fetch")) selectedTools.add(new WebFetchTool());
                 else selectedTools.add(new RunCodeTool());
             }
             return new AgentKitAgentConfiguration(builder.tools(selectedTools).build(), model);

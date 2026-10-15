@@ -85,6 +85,10 @@ limitations under the License.
             <artifactId>langchain4j-document-parser-apache-tika</artifactId>
         </dependency>
         <dependency>
+            <groupId>org.apache.poi</groupId>
+            <artifactId>poi-ooxml</artifactId>
+        </dependency>
+        <dependency>
             <groupId>org.opensearch.client</groupId>
             <artifactId>opensearch-java</artifactId>
         </dependency>
@@ -99,6 +103,10 @@ limitations under the License.
         <dependency>
             <groupId>org.postgresql</groupId>
             <artifactId>postgresql</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.clickhouse</groupId>
+            <artifactId>clickhouse-jdbc</artifactId>
         </dependency>
         <dependency>
             <groupId>org.apache.commons</groupId>

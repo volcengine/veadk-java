@@ -285,7 +285,7 @@ public class AgentKitParityTest {
                                 "MODEL_AGENT_INSTRUCTION",
                                 "custom instruction",
                                 "AGENTKIT_TOOLS",
-                                "web_search,run_code,web_search"))) {
+                                "web_search,web_fetch,run_code,web_search"))) {
             var agent = (com.google.adk.agents.LlmAgent) config.agent();
             assertEquals("configured", agent.name());
             assertEquals("description", agent.description());
@@ -293,7 +293,7 @@ public class AgentKitParityTest {
                     "custom instruction",
                     ((com.google.adk.agents.Instruction.Static) agent.instruction()).instruction());
             assertEquals(
-                    List.of("web_search", "run_code"),
+                    List.of("web_search", "web_fetch", "run_code"),
                     agent.tools().blockingGet().stream().map(t -> t.name()).toList());
         }
     }

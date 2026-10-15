@@ -436,3 +436,6 @@ Java Agent 当前不支持以下 Python 侧能力：
 
 [通过 AgentKit Simple App HTTP 接口运行 Java Agent](docs/agentkit-runtime.md)，
 包含本地启动、容器封装与 HTTP 契约测试。Java 脚手架和构建需使用包含 `basic_java` 生命周期模板的 AgentKit CLI。
+
+Web 抓取、并行搜索、TTS、PPT、飞书、云手机及 Vanna + ClickHouse 的接入方式见
+[内置工具说明](docs/builtin-tools.md)。

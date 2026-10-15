@@ -478,3 +478,6 @@ This project uses the Apache License 2.0; see the `LICENSE` file for details.
 [Run a Java agent with AgentKit Simple App HTTP routes](docs/agentkit-runtime.md).
 The example includes local startup, container packaging and HTTP contract tests.
 Use an AgentKit CLI build with the `basic_java` lifecycle template for Java scaffolding and builds.
+
+See [Built-in tools](docs/builtin-tools.md) for web fetch, parallel search, TTS, PowerPoint, Lark,
+mobile use, and Vanna + ClickHouse setup.
