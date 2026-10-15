@@ -1,8 +1,8 @@
 /** Copyright (c) 2025 Beijing Volcano Engine Technology Co., Ltd. */
 package com.volcengine.veadk.security.identity;
 
-import com.google.adk.models.LlmRequest;
 import com.google.adk.tools.BaseTool;
+import com.google.adk.tools.FunctionTool;
 import com.google.adk.tools.ToolContext;
 import com.google.genai.types.FunctionDeclaration;
 import com.google.genai.types.Schema;
@@ -12,7 +12,6 @@ import io.reactivex.rxjava3.core.Scheduler;
 import io.reactivex.rxjava3.core.Single;
 import io.reactivex.rxjava3.schedulers.Schedulers;
 import java.time.Duration;
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -22,17 +21,19 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
 /**
- * Adds managed OAuth2 authorization to an ADK tool without exposing credentials to the model.
+ * Adds managed OAuth2 authorization to an ADK function tool without exposing credentials to the
+ * model.
  *
  * <p>When Identity returns an authorization URL, the tool invocation remains pending while this
  * wrapper notifies the application and polls Identity. The original tool runs once after an access
  * token is available.
  */
 public final class IdentityOAuth2Tool extends BaseTool {
-    private final BaseTool delegate;
+    private static final String ACCESS_TOKEN_ARGUMENT = "access_token";
+
+    private final FunctionTool delegate;
     private final IdentityCredentials credentials;
     private final String providerName;
-    private final String credentialArgument;
     private final String flow;
     private final List<String> scopes;
     private final String redirectUrl;
@@ -51,7 +52,6 @@ public final class IdentityOAuth2Tool extends BaseTool {
         this.delegate = builder.delegate;
         this.credentials = builder.credentials;
         this.providerName = requireText(builder.providerName, "providerName");
-        this.credentialArgument = requireText(builder.credentialArgument, "credentialArgument");
         this.flow = builder.flow;
         this.scopes = List.copyOf(builder.scopes);
         this.redirectUrl = builder.redirectUrl;
@@ -63,22 +63,17 @@ public final class IdentityOAuth2Tool extends BaseTool {
                 Objects.requireNonNull(
                         builder.authorizationUrlHandler, "authorizationUrlHandler must be set.");
         this.scheduler = Objects.requireNonNull(builder.scheduler, "scheduler must be set.");
-        this.declaration = hideCredential(delegate.declaration(), credentialArgument);
+        this.declaration = hideCredential(delegate.declaration());
         delegate.customMetadata().forEach(this::setCustomMetadata);
     }
 
-    public static Builder builder(BaseTool delegate, IdentityCredentials credentials) {
+    public static Builder builder(FunctionTool delegate, IdentityCredentials credentials) {
         return new Builder(delegate, credentials);
     }
 
     @Override
     public Optional<FunctionDeclaration> declaration() {
         return declaration;
-    }
-
-    @Override
-    public Completable processLlmRequest(LlmRequest.Builder request, ToolContext context) {
-        return delegate.processLlmRequest(request, context);
     }
 
     @Override
@@ -128,50 +123,31 @@ public final class IdentityOAuth2Tool extends BaseTool {
 
     private Map<String, Object> withCredential(Map<String, Object> args, String token) {
         Map<String, Object> securedArgs = new LinkedHashMap<>(args);
-        securedArgs.put(credentialArgument, token);
+        securedArgs.put(ACCESS_TOKEN_ARGUMENT, token);
         return securedArgs;
     }
 
     private static Optional<FunctionDeclaration> hideCredential(
-            Optional<FunctionDeclaration> declaration, String credentialArgument) {
+            Optional<FunctionDeclaration> declaration) {
         return declaration.map(
                 value -> {
                     FunctionDeclaration.Builder builder = value.toBuilder();
                     value.parameters()
-                            .map(schema -> hideSchemaCredential(schema, credentialArgument))
+                            .map(IdentityOAuth2Tool::hideAccessToken)
                             .ifPresent(builder::parameters);
-                    value.parametersJsonSchema()
-                            .map(schema -> hideJsonSchemaCredential(schema, credentialArgument))
-                            .ifPresent(builder::parametersJsonSchema);
                     return builder.build();
                 });
     }
 
-    private static Schema hideSchemaCredential(Schema schema, String credentialArgument) {
+    private static Schema hideAccessToken(Schema schema) {
         Map<String, Schema> properties =
                 new LinkedHashMap<>(schema.properties().orElseGet(Map::of));
-        properties.remove(credentialArgument);
-        List<String> required = new ArrayList<>(schema.required().orElseGet(List::of));
-        required.removeIf(credentialArgument::equals);
+        properties.remove(ACCESS_TOKEN_ARGUMENT);
+        List<String> required =
+                schema.required().orElseGet(List::of).stream()
+                        .filter(value -> !ACCESS_TOKEN_ARGUMENT.equals(value))
+                        .toList();
         return schema.toBuilder().properties(properties).required(required).build();
-    }
-
-    private static Object hideJsonSchemaCredential(Object schema, String credentialArgument) {
-        if (!(schema instanceof Map<?, ?> source)) return schema;
-        Map<Object, Object> copy = new LinkedHashMap<>(source);
-        Object propertiesValue = copy.get("properties");
-        if (propertiesValue instanceof Map<?, ?> properties) {
-            Map<Object, Object> filteredProperties = new LinkedHashMap<>(properties);
-            filteredProperties.remove(credentialArgument);
-            copy.put("properties", filteredProperties);
-        }
-        Object requiredValue = copy.get("required");
-        if (requiredValue instanceof List<?> required) {
-            copy.put(
-                    "required",
-                    required.stream().filter(value -> !credentialArgument.equals(value)).toList());
-        }
-        return copy;
     }
 
     private static String requireText(String value, String name) {
@@ -189,10 +165,9 @@ public final class IdentityOAuth2Tool extends BaseTool {
     }
 
     public static final class Builder {
-        private final BaseTool delegate;
+        private final FunctionTool delegate;
         private final IdentityCredentials credentials;
         private String providerName;
-        private String credentialArgument;
         private String flow;
         private List<String> scopes = List.of();
         private String redirectUrl;
@@ -202,18 +177,13 @@ public final class IdentityOAuth2Tool extends BaseTool {
         private Consumer<String> authorizationUrlHandler;
         private Scheduler scheduler = Schedulers.io();
 
-        private Builder(BaseTool delegate, IdentityCredentials credentials) {
+        private Builder(FunctionTool delegate, IdentityCredentials credentials) {
             this.delegate = Objects.requireNonNull(delegate, "delegate must be set.");
             this.credentials = Objects.requireNonNull(credentials, "credentials must be set.");
         }
 
         public Builder providerName(String providerName) {
             this.providerName = providerName;
-            return this;
-        }
-
-        public Builder credentialArgument(String credentialArgument) {
-            this.credentialArgument = credentialArgument;
             return this;
         }
 

@@ -27,18 +27,18 @@ Agent agent = Agent.builder()
 
 工具实现可通过 `IdentityCredentials.workloadToken(...)`、`apiKey(...)` 或 `oauth2(...)` 获取受管凭证，再注入实际的出站请求。API Key 按 Agent、用户、Provider 缓存；OAuth2 用户联邦可能返回 `AUTHORIZATION_URL`，调用方应展示给用户完成授权。
 
-需要自动完成 OAuth2 授权并恢复工具调用时，可包装任意 ADK `BaseTool`：
+需要自动完成 OAuth2 授权并恢复函数工具调用时，可包装 ADK `FunctionTool`：
 
 ```java
+FunctionTool calendarTool = FunctionTool.create(CalendarFunctions.class, "search");
 BaseTool authorizedTool = IdentityOAuth2Tool.builder(calendarTool, credentials)
         .providerName("calendar")
-        .credentialArgument("access_token")
         .scopes(List.of("calendar.read"))
         .onAuthorizationUrl(url -> sendAuthorizationUrlToUser(url))
         .build();
 ```
 
-包装器会从模型可见的工具声明中移除 `access_token`，并覆盖模型意外传入的同名参数。Identity 直接返回 Token 时立即执行原工具；返回授权 URL 时先通知应用，再轮询授权结果。取得 Token 后只执行一次原工具；默认每 2 秒轮询、5 分钟超时，可通过 `pollInterval(...)` 与 `authorizationTimeout(...)` 调整。应用必须提供 URL 回调，避免授权链接被静默丢弃或写入日志。
+被包装的函数使用名为 `access_token` 的 `String` 参数接收凭证。包装器会从模型可见的工具声明中移除该参数，并覆盖模型意外传入的同名值。Identity 直接返回 Token 时立即执行原工具；返回授权 URL 时先通知应用，再轮询授权结果。取得 Token 后只执行一次原工具；默认每 2 秒轮询、5 分钟超时，可通过 `pollInterval(...)` 与 `authorizationTimeout(...)` 调整。应用必须提供 URL 回调，避免授权链接被静默丢弃或写入日志。MCP 凭证应通过专用传输层注入请求头，不应放入普通工具参数。
 
 `AgentSecurity` 会先执行工具权限检查；拒绝时不会调用 LLM Shield 或实际工具。通过后再审核工具参数，工具执行后审核结果。
 

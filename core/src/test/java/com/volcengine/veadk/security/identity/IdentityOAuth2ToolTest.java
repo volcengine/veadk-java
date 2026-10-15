@@ -2,19 +2,14 @@
 package com.volcengine.veadk.security.identity;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-import com.google.adk.models.LlmRequest;
 import com.google.adk.sessions.State;
 import com.google.adk.tools.Annotations.Schema;
-import com.google.adk.tools.BaseTool;
 import com.google.adk.tools.FunctionTool;
 import com.google.adk.tools.ToolContext;
-import com.google.common.collect.ImmutableMap;
-import com.google.genai.types.FunctionDeclaration;
-import io.reactivex.rxjava3.core.Completable;
-import io.reactivex.rxjava3.core.Single;
 import io.reactivex.rxjava3.observers.TestObserver;
 import io.reactivex.rxjava3.schedulers.TestScheduler;
 import java.time.Duration;
@@ -25,67 +20,87 @@ import java.util.Deque;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 
 class IdentityOAuth2ToolTest {
 
     @Test
-    void injectsImmediateTokenWithoutExposingOrAcceptingCredentialArgument() {
+    void injectsImmediateTokenWithoutExposingOrAcceptingModelCredential() {
         SequenceIdentityClient client =
                 new SequenceIdentityClient(
                         new OAuth2Credential(OAuth2Credential.Type.TOKEN, "managed-token"));
-        CapturingTool delegate = new CapturingTool();
+        CalendarFunctions functions = new CalendarFunctions();
         AtomicInteger authorizationUrls = new AtomicInteger();
         IdentityOAuth2Tool tool =
                 tool(
-                        delegate,
+                        functions,
                         client,
                         new TestScheduler(),
                         ignored -> authorizationUrls.incrementAndGet());
-        ToolContext context = context();
 
         Map<String, Object> result =
-                tool.runAsync(Map.of("query", "weather", "access_token", "model-supplied"), context)
+                tool.runAsync(
+                                Map.of("query", "weather", "access_token", "model-supplied"),
+                                context())
                         .blockingGet();
 
-        assertThat(result).containsEntry("token", "managed-token");
-        assertThat(delegate.arguments.get())
+        assertThat(result)
                 .containsEntry("query", "weather")
-                .containsEntry("access_token", "managed-token");
+                .containsEntry("token", "managed-token");
+        assertThat(functions.calls).hasValue(1);
         assertThat(authorizationUrls).hasValue(0);
         assertThat(client.forceAuthenticationValues).containsExactly(false);
-        com.google.genai.types.Schema parameters =
-                tool.declaration().orElseThrow().parameters().orElseThrow();
-        assertThat(parameters.properties().orElseThrow()).containsOnlyKeys("query");
-        assertThat(parameters.required().orElseThrow()).containsExactly("query");
+        assertThat(
+                        tool.declaration()
+                                .orElseThrow()
+                                .parameters()
+                                .orElseThrow()
+                                .properties()
+                                .orElseThrow())
+                .containsOnlyKeys("query");
+        assertThat(
+                        tool.declaration()
+                                .orElseThrow()
+                                .parameters()
+                                .orElseThrow()
+                                .required()
+                                .orElseThrow())
+                .containsExactly("query");
     }
 
     @Test
-    void hidesCredentialFromJsonSchemaDeclarations() {
+    void waitsForUserAuthorizationThenRunsOriginalFunctionOnce() {
         SequenceIdentityClient client =
                 new SequenceIdentityClient(
-                        new OAuth2Credential(OAuth2Credential.Type.TOKEN, "managed-token"));
-        IdentityOAuth2Tool tool =
-                IdentityOAuth2Tool.builder(new JsonSchemaTool(), new IdentityCredentials(client))
-                        .providerName("calendar")
-                        .credentialArgument("access_token")
-                        .onAuthorizationUrl(ignored -> {})
-                        .build();
+                        new OAuth2Credential(
+                                OAuth2Credential.Type.AUTHORIZATION_URL,
+                                "https://identity.example/authorize"),
+                        new OAuth2Credential(
+                                OAuth2Credential.Type.AUTHORIZATION_URL,
+                                "https://identity.example/authorize"),
+                        new OAuth2Credential(OAuth2Credential.Type.TOKEN, "authorized-token"));
+        CalendarFunctions functions = new CalendarFunctions();
+        TestScheduler scheduler = new TestScheduler();
+        List<String> urls = new ArrayList<>();
+        IdentityOAuth2Tool tool = tool(functions, client, scheduler, urls::add);
 
-        Object schema = tool.declaration().orElseThrow().parametersJsonSchema().orElseThrow();
+        TestObserver<Map<String, Object>> observer =
+                tool.runAsync(Map.of("query", "calendar"), context()).test();
 
-        assertThat(schema)
-                .isInstanceOfSatisfying(
-                        Map.class,
-                        value -> {
-                            assertThat(value.get("properties"))
-                                    .isEqualTo(Map.of("query", Map.of("type", "string")));
-                            assertThat(value.get("required")).isEqualTo(List.of("query"));
-                        });
+        observer.assertNotComplete();
+        assertThat(urls).containsExactly("https://identity.example/authorize");
+        assertThat(functions.calls).hasValue(0);
+
+        scheduler.advanceTimeBy(2, TimeUnit.SECONDS);
+
+        observer.assertComplete().assertNoErrors();
+        assertThat(observer.values())
+                .singleElement()
+                .satisfies(value -> assertThat(value).containsEntry("token", "authorized-token"));
+        assertThat(functions.calls).hasValue(1);
+        assertThat(client.forceAuthenticationValues).containsExactly(false, false, false);
     }
 
     @Test
@@ -94,9 +109,10 @@ class IdentityOAuth2ToolTest {
                 new SequenceIdentityClient(
                         new OAuth2Credential(OAuth2Credential.Type.TOKEN, "managed-token"));
         IdentityOAuth2Tool tool =
-                IdentityOAuth2Tool.builder(new CapturingTool(), new IdentityCredentials(client))
+                IdentityOAuth2Tool.builder(
+                                functionTool(new CalendarFunctions()),
+                                new IdentityCredentials(client))
                         .providerName("calendar")
-                        .credentialArgument("access_token")
                         .flow("USER_FEDERATION")
                         .scopes(List.of("calendar.read"))
                         .redirectUrl("https://app.example/oauth/callback")
@@ -113,92 +129,17 @@ class IdentityOAuth2ToolTest {
     }
 
     @Test
-    void wrapsAdkFunctionToolAndInjectsHiddenCredential() {
-        SequenceIdentityClient client =
-                new SequenceIdentityClient(
-                        new OAuth2Credential(OAuth2Credential.Type.TOKEN, "managed-token"));
-        BaseTool functionTool = FunctionTool.create(CalendarFunction.class, "search");
-        IdentityOAuth2Tool tool =
-                IdentityOAuth2Tool.builder(functionTool, new IdentityCredentials(client))
-                        .providerName("calendar")
-                        .credentialArgument("access_token")
-                        .onAuthorizationUrl(ignored -> {})
-                        .build();
-
-        Map<String, Object> result =
-                tool.runAsync(Map.of("query", "events"), context()).blockingGet();
-
-        assertThat(result).containsEntry("query", "events").containsEntry("token", "managed-token");
-        assertThat(
-                        tool.declaration()
-                                .orElseThrow()
-                                .parameters()
-                                .orElseThrow()
-                                .properties()
-                                .orElseThrow())
-                .containsOnlyKeys("query");
-    }
-
-    @Test
-    void preservesDelegateRequestProcessing() {
-        SequenceIdentityClient client =
-                new SequenceIdentityClient(
-                        new OAuth2Credential(OAuth2Credential.Type.TOKEN, "managed-token"));
-        CapturingTool delegate = new CapturingTool();
-        IdentityOAuth2Tool tool = tool(delegate, client, new TestScheduler(), ignored -> {});
-
-        tool.processLlmRequest(mock(LlmRequest.Builder.class), context()).blockingAwait();
-
-        assertThat(delegate.processRequestCalls).hasValue(1);
-    }
-
-    @Test
-    void waitsForUserAuthorizationThenRunsOriginalToolOnce() {
-        SequenceIdentityClient client =
-                new SequenceIdentityClient(
-                        new OAuth2Credential(
-                                OAuth2Credential.Type.AUTHORIZATION_URL,
-                                "https://identity.example/authorize"),
-                        new OAuth2Credential(
-                                OAuth2Credential.Type.AUTHORIZATION_URL,
-                                "https://identity.example/authorize"),
-                        new OAuth2Credential(OAuth2Credential.Type.TOKEN, "authorized-token"));
-        CapturingTool delegate = new CapturingTool();
-        TestScheduler scheduler = new TestScheduler();
-        List<String> urls = new ArrayList<>();
-        IdentityOAuth2Tool tool = tool(delegate, client, scheduler, urls::add);
-
-        TestObserver<Map<String, Object>> observer =
-                tool.runAsync(Map.of("query", "calendar"), context()).test();
-
-        observer.assertNotComplete();
-        assertThat(urls).containsExactly("https://identity.example/authorize");
-        assertThat(delegate.calls).hasValue(0);
-
-        scheduler.advanceTimeBy(2, TimeUnit.SECONDS);
-
-        observer.assertComplete().assertNoErrors();
-        assertThat(observer.values())
-                .singleElement()
-                .satisfies(value -> assertThat(value).containsEntry("token", "authorized-token"));
-        assertThat(delegate.calls).hasValue(1);
-        assertThat(client.forceAuthenticationValues).containsExactly(false, false, false);
-    }
-
-    @Test
-    void forcesOnlyInitialAuthorizationRequestAndTimesOutWithoutRunningTool() {
+    void forcesOnlyInitialAuthorizationRequestAndTimesOutWithoutRunningFunction() {
         SequenceIdentityClient client =
                 new SequenceIdentityClient(
                         new OAuth2Credential(
                                 OAuth2Credential.Type.AUTHORIZATION_URL,
                                 "https://identity.example/authorize"));
-        CapturingTool delegate = new CapturingTool();
+        CalendarFunctions functions = new CalendarFunctions();
         TestScheduler scheduler = new TestScheduler();
-        IdentityCredentials credentials = new IdentityCredentials(client);
         IdentityOAuth2Tool tool =
-                IdentityOAuth2Tool.builder(delegate, credentials)
+                IdentityOAuth2Tool.builder(functionTool(functions), new IdentityCredentials(client))
                         .providerName("calendar")
-                        .credentialArgument("access_token")
                         .forceAuthentication(true)
                         .pollInterval(Duration.ofSeconds(1))
                         .authorizationTimeout(Duration.ofSeconds(3))
@@ -211,21 +152,21 @@ class IdentityOAuth2ToolTest {
         scheduler.advanceTimeBy(3, TimeUnit.SECONDS);
 
         observer.assertError(java.util.concurrent.TimeoutException.class);
-        assertThat(delegate.calls).hasValue(0);
+        assertThat(functions.calls).hasValue(0);
         assertThat(client.forceAuthenticationValues.get(0)).isTrue();
         assertThat(client.forceAuthenticationValues.stream().skip(1)).allMatch(value -> !value);
     }
 
     @Test
-    void cancellationStopsPollingAndDoesNotRunOriginalTool() {
+    void cancellationStopsPollingAndDoesNotRunFunction() {
         SequenceIdentityClient client =
                 new SequenceIdentityClient(
                         new OAuth2Credential(
                                 OAuth2Credential.Type.AUTHORIZATION_URL,
                                 "https://identity.example/authorize"));
-        CapturingTool delegate = new CapturingTool();
+        CalendarFunctions functions = new CalendarFunctions();
         TestScheduler scheduler = new TestScheduler();
-        IdentityOAuth2Tool tool = tool(delegate, client, scheduler, ignored -> {});
+        IdentityOAuth2Tool tool = tool(functions, client, scheduler, ignored -> {});
         TestObserver<Map<String, Object>> observer =
                 tool.runAsync(Map.of("query", "events"), context()).test();
 
@@ -235,21 +176,21 @@ class IdentityOAuth2ToolTest {
         scheduler.advanceTimeBy(10, TimeUnit.SECONDS);
 
         assertThat(client.forceAuthenticationValues).hasSize(callsBeforeCancellation);
-        assertThat(delegate.calls).hasValue(0);
+        assertThat(functions.calls).hasValue(0);
     }
 
     @Test
-    void authorizationUrlHandlerFailureStopsBeforePollingOrToolExecution() {
+    void authorizationUrlHandlerFailureStopsBeforePollingOrFunctionExecution() {
         SequenceIdentityClient client =
                 new SequenceIdentityClient(
                         new OAuth2Credential(
                                 OAuth2Credential.Type.AUTHORIZATION_URL,
                                 "https://identity.example/authorize"));
-        CapturingTool delegate = new CapturingTool();
+        CalendarFunctions functions = new CalendarFunctions();
         TestScheduler scheduler = new TestScheduler();
         IdentityOAuth2Tool tool =
                 tool(
-                        delegate,
+                        functions,
                         client,
                         scheduler,
                         ignored -> {
@@ -265,49 +206,36 @@ class IdentityOAuth2ToolTest {
 
         scheduler.advanceTimeBy(10, TimeUnit.SECONDS);
         assertThat(client.forceAuthenticationValues).hasSize(1);
-        assertThat(delegate.calls).hasValue(0);
+        assertThat(functions.calls).hasValue(0);
     }
 
     @Test
-    void requiresAnAuthorizationUrlHandler() {
-        CapturingTool delegate = new CapturingTool();
-        SequenceIdentityClient client =
-                new SequenceIdentityClient(
-                        new OAuth2Credential(OAuth2Credential.Type.TOKEN, "token"));
-
-        org.assertj.core.api.Assertions.assertThatThrownBy(
-                        () ->
-                                IdentityOAuth2Tool.builder(
-                                                delegate, new IdentityCredentials(client))
-                                        .providerName("calendar")
-                                        .credentialArgument("access_token")
-                                        .build())
-                .isInstanceOf(NullPointerException.class)
-                .hasMessageContaining("authorizationUrlHandler");
-    }
-
-    @Test
-    void rejectsBlankIdentityConfigurationAndSubMillisecondIntervals() {
-        CapturingTool delegate = new CapturingTool();
+    void validatesRequiredConfigurationAndPollingInterval() {
+        FunctionTool functionTool = functionTool(new CalendarFunctions());
         IdentityCredentials credentials =
                 new IdentityCredentials(
                         new SequenceIdentityClient(
                                 new OAuth2Credential(OAuth2Credential.Type.TOKEN, "token")));
 
-        org.assertj.core.api.Assertions.assertThatThrownBy(
+        assertThatThrownBy(
                         () ->
-                                IdentityOAuth2Tool.builder(delegate, credentials)
+                                IdentityOAuth2Tool.builder(functionTool, credentials)
+                                        .providerName("calendar")
+                                        .build())
+                .isInstanceOf(NullPointerException.class)
+                .hasMessageContaining("authorizationUrlHandler");
+        assertThatThrownBy(
+                        () ->
+                                IdentityOAuth2Tool.builder(functionTool, credentials)
                                         .providerName(" ")
-                                        .credentialArgument("access_token")
                                         .onAuthorizationUrl(ignored -> {})
                                         .build())
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("providerName");
-        org.assertj.core.api.Assertions.assertThatThrownBy(
+        assertThatThrownBy(
                         () ->
-                                IdentityOAuth2Tool.builder(delegate, credentials)
+                                IdentityOAuth2Tool.builder(functionTool, credentials)
                                         .providerName("calendar")
-                                        .credentialArgument("access_token")
                                         .pollInterval(Duration.ofNanos(1))
                                         .onAuthorizationUrl(ignored -> {})
                                         .build())
@@ -316,18 +244,21 @@ class IdentityOAuth2ToolTest {
     }
 
     private static IdentityOAuth2Tool tool(
-            CapturingTool delegate,
+            CalendarFunctions functions,
             IdentityClient client,
             TestScheduler scheduler,
             java.util.function.Consumer<String> handler) {
-        return IdentityOAuth2Tool.builder(delegate, new IdentityCredentials(client))
+        return IdentityOAuth2Tool.builder(functionTool(functions), new IdentityCredentials(client))
                 .providerName("calendar")
-                .credentialArgument("access_token")
                 .pollInterval(Duration.ofSeconds(1))
                 .authorizationTimeout(Duration.ofSeconds(10))
                 .onAuthorizationUrl(handler)
                 .scheduler(scheduler)
                 .build();
+    }
+
+    private static FunctionTool functionTool(CalendarFunctions functions) {
+        return FunctionTool.create(functions, "search");
     }
 
     private static ToolContext context() {
@@ -338,85 +269,14 @@ class IdentityOAuth2ToolTest {
         return context;
     }
 
-    private static final class CapturingTool extends BaseTool {
-        private final AtomicReference<Map<String, Object>> arguments = new AtomicReference<>();
+    public static final class CalendarFunctions {
         private final AtomicInteger calls = new AtomicInteger();
-        private final AtomicInteger processRequestCalls = new AtomicInteger();
 
-        private CapturingTool() {
-            super("calendar_search", "Search the user's calendar.");
-        }
-
-        @Override
-        public Optional<FunctionDeclaration> declaration() {
-            return Optional.of(
-                    FunctionDeclaration.builder()
-                            .name(name())
-                            .description(description())
-                            .parameters(
-                                    com.google.genai.types.Schema.builder()
-                                            .type("OBJECT")
-                                            .properties(
-                                                    ImmutableMap.of(
-                                                            "query",
-                                                            com.google.genai.types.Schema.builder()
-                                                                    .type("STRING")
-                                                                    .build(),
-                                                            "access_token",
-                                                            com.google.genai.types.Schema.builder()
-                                                                    .type("STRING")
-                                                                    .build()))
-                                            .required("query", "access_token")
-                                            .build())
-                            .build());
-        }
-
-        @Override
-        public Completable processLlmRequest(LlmRequest.Builder request, ToolContext context) {
-            processRequestCalls.incrementAndGet();
-            return Completable.complete();
-        }
-
-        @Override
-        public Single<Map<String, Object>> runAsync(Map<String, Object> args, ToolContext context) {
-            calls.incrementAndGet();
-            arguments.set(Map.copyOf(args));
-            return Single.just(Map.of("token", args.get("access_token")));
-        }
-    }
-
-    public static final class CalendarFunction {
-        public static Map<String, Object> search(
+        public Map<String, Object> search(
                 @Schema(name = "query") String query,
                 @Schema(name = "access_token") String accessToken) {
+            calls.incrementAndGet();
             return Map.of("query", query, "token", accessToken);
-        }
-    }
-
-    private static final class JsonSchemaTool extends BaseTool {
-        private JsonSchemaTool() {
-            super("calendar_search", "Search the user's calendar.");
-        }
-
-        @Override
-        public Optional<FunctionDeclaration> declaration() {
-            Map<String, Object> properties =
-                    Map.of(
-                            "query", Map.of("type", "string"),
-                            "access_token", Map.of("type", "string"));
-            return Optional.of(
-                    FunctionDeclaration.builder()
-                            .name(name())
-                            .description(description())
-                            .parametersJsonSchema(
-                                    Map.of(
-                                            "type",
-                                            "object",
-                                            "properties",
-                                            properties,
-                                            "required",
-                                            List.of("query", "access_token")))
-                            .build());
         }
     }
 
