@@ -268,10 +268,17 @@ reuse the same `userId` and `sessionId` when running follow-up turns:
 import com.volcengine.veadk.Agent;
 import com.volcengine.veadk.Runner;
 import com.volcengine.veadk.memory.ShortTermMemory;
+import com.google.adk.summarizer.EventsCompactionConfig;
 
 ShortTermMemory shortTermMemory = ShortTermMemory.builder()
     .local()
     .numRecentInvocationsToKeep(3)
+    .eventsCompactionConfig(EventsCompactionConfig.builder()
+        .compactionInterval(5)
+        .overlapSize(1)
+        .build())
+    .maxToolResultChars(4000)
+    .toolResultSummaryChars(1000)
     .build();
 
 Agent agent = Agent.builder()
@@ -290,6 +297,12 @@ runner.run("user_1", "session_1", "What is my name?");
 `numRecentInvocationsToKeep(...)` limits only the history sent in each model
 request. The session service still stores the complete event history, and the
 window keeps tool calls together with their responses.
+
+`eventsCompactionConfig(...)` uses ADK's native event summarizer. Configure
+`compactionInterval` plus `overlapSize` for invocation-based sliding compaction.
+`maxToolResultChars(...)` replaces oversized tool payloads in later model context
+with a bounded structured summary while preserving status/error diagnostics and
+the ADK function-call pairing.
 
 Mem0 saves are asynchronous by default. Completion means that Mem0 accepted
 the request; the new memory may not be immediately searchable. Use synchronous

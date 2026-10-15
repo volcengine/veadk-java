@@ -35,12 +35,14 @@ public class AgentKitWrapper extends BaseServiceImpl implements AutoCloseable {
     private static final String ACTION_LIST_SESSIONS = "ListSessions";
     private static final String ACTION_CREATE_SESSION = "CreateSession";
     private static final String ACTION_GET_SESSION = "GetSession";
+    private static final String ACTION_DELETE_SESSION = "DeleteSession";
     private static final String ACTION_LIST_SKILLS_BY_SPACE_ID = "ListSkillsBySpaceId";
     private static final String ACTION_GEN_TEMP_TOS_OBJECT_DOWNLOAD_URL =
             "GenTempTosObjectDownloadUrl";
     private static final String ACTION_SEARCH_AGENT_CARDS = "SearchAgentCards";
     private static final String API_VERSION = "2025-10-30";
-    private static final int SESSION_PAGE_SIZE = 20;
+    private static final int SESSION_PAGE_SIZE = 100;
+    private static final int MAX_SESSION_PAGES = 100;
     private static final long SESSION_READY_TIMEOUT_MILLIS = 120_000;
     private static final long SESSION_POLL_INTERVAL_MILLIS = 1_000;
 
@@ -69,6 +71,7 @@ public class AgentKitWrapper extends BaseServiceImpl implements AutoCloseable {
                     put(ACTION_LIST_SESSIONS, jsonPostApiInfo());
                     put(ACTION_CREATE_SESSION, jsonPostApiInfo());
                     put(ACTION_GET_SESSION, jsonPostApiInfo());
+                    put(ACTION_DELETE_SESSION, jsonPostApiInfo());
                     put(ACTION_LIST_SKILLS_BY_SPACE_ID, jsonPostApiInfo());
                     put(ACTION_GEN_TEMP_TOS_OBJECT_DOWNLOAD_URL, jsonPostApiInfo());
                     put(ACTION_SEARCH_AGENT_CARDS, jsonPostApiInfo());
@@ -105,12 +108,12 @@ public class AgentKitWrapper extends BaseServiceImpl implements AutoCloseable {
         destroy();
     }
 
-    public AgentKitSession ensureSessionEndpoint(
+    public synchronized AgentKitSession ensureSessionEndpoint(
             String toolId, String toolUserSessionId, int ttl, boolean waitUntilReady) {
         return ensureSessionEndpoint(toolId, toolUserSessionId, ttl, waitUntilReady, Map.of());
     }
 
-    public AgentKitSession ensureSessionEndpoint(
+    public synchronized AgentKitSession ensureSessionEndpoint(
             String toolId,
             String toolUserSessionId,
             int ttl,
@@ -196,52 +199,88 @@ public class AgentKitWrapper extends BaseServiceImpl implements AutoCloseable {
         return parseSession(invokeAction(ACTION_GET_SESSION, requestBody));
     }
 
-    public Optional<AgentKitSession> findReusableSession(String toolId, String toolUserSessionId) {
-        Map<String, Object> filter = new HashMap<>();
-        filter.put("Name", "UserSessionId");
-        filter.put(
-                "Values",
-                List.of(requireText(toolUserSessionId, "toolUserSessionId must be set.")));
+    /** Lists all sessions for a tool, following AgentKit's NextToken pagination contract. */
+    public List<AgentKitSession> listSessions(String toolId) {
+        return listSessions(toolId, null);
+    }
 
-        Map<String, Object> requestBody = new HashMap<>();
-        requestBody.put("ToolId", requireText(toolId, "toolId must be set."));
-        requestBody.put("Filters", List.of(filter));
-        requestBody.put("PageSize", SESSION_PAGE_SIZE);
-
-        try {
+    private List<AgentKitSession> listSessions(String toolId, String userSessionId) {
+        String resolvedToolId = requireText(toolId, "toolId must be set.");
+        List<AgentKitSession> sessions = new ArrayList<>();
+        String nextToken = null;
+        java.util.Set<String> seenTokens = new java.util.HashSet<>();
+        for (int page = 0; page < MAX_SESSION_PAGES; page++) {
+            Map<String, Object> requestBody = new HashMap<>();
+            requestBody.put("ToolId", resolvedToolId);
+            requestBody.put("MaxResults", SESSION_PAGE_SIZE);
+            if (userSessionId != null) {
+                requestBody.put(
+                        "Filters",
+                        List.of(Map.of("Name", "UserSessionId", "Values", List.of(userSessionId))));
+            }
+            if (nextToken != null) {
+                requestBody.put("NextToken", nextToken);
+            }
             JsonNode result = invokeAction(ACTION_LIST_SESSIONS, requestBody);
             JsonNode sessionInfos = result.path("SessionInfos");
-            if (!sessionInfos.isArray()) {
-                return Optional.empty();
+            if (sessionInfos.isArray()) {
+                sessionInfos.forEach(value -> sessions.add(parseSession(value)));
             }
-            List<AgentKitSession> candidates = new ArrayList<>();
-            for (JsonNode sessionInfo : sessionInfos) {
-                AgentKitSession session = parseSession(sessionInfo);
-                if (toolUserSessionId.equals(session.userSessionId().orElse(""))
-                        && !isTerminalStatus(session.status().orElse(""))) {
-                    candidates.add(session);
-                }
+            nextToken = text(result, "NextToken", "next_token").orElse(null);
+            if (nextToken == null) {
+                return List.copyOf(sessions);
             }
-            return candidates.stream()
-                    .max(Comparator.comparing(session -> session.createdAt().orElse("")));
-        } catch (Exception e) {
-            log.debug("AgentKit ListSessions failed, falling back to CreateSession", e);
-            return Optional.empty();
+            if (!seenTokens.add(nextToken)) {
+                throw new IllegalStateException(
+                        "AgentKit ListSessions returned a repeated NextToken");
+            }
         }
+        throw new IllegalStateException("AgentKit ListSessions exceeded the pagination limit");
+    }
+
+    /** Deletes a sandbox session. */
+    public void deleteSession(String toolId, String sessionId) {
+        Map<String, Object> requestBody = new HashMap<>();
+        requestBody.put("ToolId", requireText(toolId, "toolId must be set."));
+        requestBody.put("SessionId", requireText(sessionId, "sessionId must be set."));
+        invokeAction(ACTION_DELETE_SESSION, requestBody);
+    }
+
+    public Optional<AgentKitSession> findReusableSession(String toolId, String toolUserSessionId) {
+        String resolvedUserSessionId =
+                requireText(toolUserSessionId, "toolUserSessionId must be set.");
+        return listSessions(toolId, resolvedUserSessionId).stream()
+                .filter(session -> resolvedUserSessionId.equals(session.userSessionId().orElse("")))
+                .filter(session -> !isTerminalStatus(session.status().orElse("")))
+                .max(Comparator.comparing(session -> session.createdAt().orElse("")));
     }
 
     public String runCode(
             String toolId, String sessionId, String code, String language, int timeout) {
+        return runCodeInSession(toolId, "veadk_java_" + sessionId, code, language, timeout, 1800);
+    }
 
+    /** Executes code in the reusable sandbox identified by a stable UserSessionId. */
+    public String runCodeInSession(
+            String toolId,
+            String toolUserSessionId,
+            String code,
+            String language,
+            int timeout,
+            int ttl) {
         try {
-            String toolUserSessionId = "veadk_java_" + sessionId;
-
             Map<String, Object> payload = new HashMap<>();
-            payload.put("code", code);
+            payload.put("code", requireText(code, "code must be set."));
             payload.put("timeout", timeout);
-            payload.put("kernel_name", language);
+            payload.put("kernel_name", requireText(language, "language must be set."));
 
-            JsonNode result = invokeTool(toolId, toolUserSessionId, "RunCode", payload, 1800);
+            JsonNode result =
+                    invokeTool(
+                            toolId,
+                            requireText(toolUserSessionId, "toolUserSessionId must be set."),
+                            "RunCode",
+                            payload,
+                            ttl);
             JsonNode resultNode = result.path("Result");
 
             if (!resultNode.isMissingNode()) {
@@ -298,7 +337,7 @@ public class AgentKitWrapper extends BaseServiceImpl implements AutoCloseable {
         return invokeAction(ACTION_INVOKE_TOOL, requestBody);
     }
 
-    private JsonNode invokeAction(String action, Map<String, Object> requestBody) {
+    JsonNode invokeAction(String action, Map<String, Object> requestBody) {
         String bodyStr = JSONUtil.toJson(requestBody);
         try {
             RawResponse response = json(action, actionParams(action), bodyStr);
@@ -346,7 +385,8 @@ public class AgentKitWrapper extends BaseServiceImpl implements AutoCloseable {
                 text(node, "Status", "status"),
                 text(node, "Endpoint", "endpoint"),
                 text(node, "InternalEndpoint", "internal_endpoint"),
-                text(node, "CreatedAt", "created_at"));
+                text(node, "CreatedAt", "created_at"),
+                text(node, "ExpireAt", "expire_at"));
     }
 
     private static Optional<String> text(JsonNode node, String... fieldNames) {
@@ -380,6 +420,7 @@ public class AgentKitWrapper extends BaseServiceImpl implements AutoCloseable {
         private final Optional<String> endpoint;
         private final Optional<String> internalEndpoint;
         private final Optional<String> createdAt;
+        private final Optional<String> expireAt;
 
         private AgentKitSession(
                 Optional<String> sessionId,
@@ -387,7 +428,8 @@ public class AgentKitWrapper extends BaseServiceImpl implements AutoCloseable {
                 Optional<String> status,
                 Optional<String> endpoint,
                 Optional<String> internalEndpoint,
-                Optional<String> createdAt) {
+                Optional<String> createdAt,
+                Optional<String> expireAt) {
             this.sessionId = Objects.requireNonNull(sessionId, "sessionId must be set.");
             this.userSessionId =
                     Objects.requireNonNull(userSessionId, "userSessionId must be set.");
@@ -396,6 +438,7 @@ public class AgentKitWrapper extends BaseServiceImpl implements AutoCloseable {
             this.internalEndpoint =
                     Objects.requireNonNull(internalEndpoint, "internalEndpoint must be set.");
             this.createdAt = Objects.requireNonNull(createdAt, "createdAt must be set.");
+            this.expireAt = Objects.requireNonNull(expireAt, "expireAt must be set.");
         }
 
         public static AgentKitSession of(
@@ -405,13 +448,26 @@ public class AgentKitWrapper extends BaseServiceImpl implements AutoCloseable {
                 String endpoint,
                 String internalEndpoint,
                 String createdAt) {
+            return of(
+                    sessionId, userSessionId, status, endpoint, internalEndpoint, createdAt, null);
+        }
+
+        public static AgentKitSession of(
+                String sessionId,
+                String userSessionId,
+                String status,
+                String endpoint,
+                String internalEndpoint,
+                String createdAt,
+                String expireAt) {
             return new AgentKitSession(
                     Optional.ofNullable(sessionId),
                     Optional.ofNullable(userSessionId),
                     Optional.ofNullable(status),
                     Optional.ofNullable(endpoint),
                     Optional.ofNullable(internalEndpoint),
-                    Optional.ofNullable(createdAt));
+                    Optional.ofNullable(createdAt),
+                    Optional.ofNullable(expireAt));
         }
 
         public Optional<String> sessionId() {
@@ -438,6 +494,10 @@ public class AgentKitWrapper extends BaseServiceImpl implements AutoCloseable {
             return createdAt;
         }
 
+        public Optional<String> expireAt() {
+            return expireAt;
+        }
+
         private AgentKitSession withEndpointFrom(AgentKitSession other) {
             return new AgentKitSession(
                     sessionId.or(other::sessionId),
@@ -445,7 +505,8 @@ public class AgentKitWrapper extends BaseServiceImpl implements AutoCloseable {
                     status.or(other::status),
                     endpoint.or(other::endpoint),
                     internalEndpoint.or(other::internalEndpoint),
-                    createdAt.or(other::createdAt));
+                    createdAt.or(other::createdAt),
+                    expireAt.or(other::expireAt));
         }
     }
 }

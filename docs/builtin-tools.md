@@ -64,3 +64,6 @@ toolset lifecycle are required.
 
 Image generation, image editing, and asynchronous video generation are documented separately in
 [Multimodal and files](multimodal-files.md).
+
+Reusable AgentKit Code Sandbox sessions and workspace file operations are documented in
+[Sandbox sessions and files](sandbox-sessions.md).

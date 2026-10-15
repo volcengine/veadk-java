@@ -23,6 +23,8 @@ import com.google.adk.events.Event;
 import com.google.adk.sessions.BaseSessionService;
 import com.google.adk.sessions.InMemorySessionService;
 import com.google.adk.sessions.Session;
+import com.google.adk.summarizer.BaseEventSummarizer;
+import com.google.adk.summarizer.EventsCompactionConfig;
 import com.google.genai.types.Content;
 import com.google.genai.types.Part;
 import io.reactivex.rxjava3.core.Completable;
@@ -65,6 +67,43 @@ class ShortTermMemoryTest {
         assertThatThrownBy(() -> ShortTermMemory.builder().numRecentInvocationsToKeep(0))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("numRecentInvocationsToKeep must be greater than 0");
+    }
+
+    @Test
+    void configuresEventSummariesAndToolResultCompression() {
+        BaseEventSummarizer summarizer = mock(BaseEventSummarizer.class);
+        EventsCompactionConfig config =
+                EventsCompactionConfig.builder()
+                        .compactionInterval(4)
+                        .overlapSize(1)
+                        .summarizer(summarizer)
+                        .build();
+
+        ShortTermMemory memory =
+                ShortTermMemory.builder()
+                        .eventsCompactionConfig(config)
+                        .maxToolResultChars(4096)
+                        .toolResultSummaryChars(800)
+                        .build();
+
+        assertThat(memory.eventsCompactionConfig()).contains(config);
+        assertThat(memory.maxToolResultChars()).hasValue(4096);
+        assertThat(memory.toolResultSummaryChars()).isEqualTo(800);
+    }
+
+    @Test
+    void rejectsInvalidToolResultCompressionLimits() {
+        assertThatThrownBy(() -> ShortTermMemory.builder().maxToolResultChars(255))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("maxToolResultChars");
+        assertThatThrownBy(
+                        () ->
+                                ShortTermMemory.builder()
+                                        .maxToolResultChars(512)
+                                        .toolResultSummaryChars(512)
+                                        .build())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("toolResultSummaryChars");
     }
 
     @Test

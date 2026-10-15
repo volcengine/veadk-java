@@ -18,6 +18,8 @@ package com.volcengine.veadk;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import com.google.adk.agents.BaseAgent;
 import com.google.adk.agents.InvocationContext;
@@ -30,10 +32,13 @@ import com.google.adk.models.BaseLlmConnection;
 import com.google.adk.models.LlmRequest;
 import com.google.adk.models.LlmResponse;
 import com.google.adk.sessions.InMemorySessionService;
+import com.google.adk.summarizer.BaseEventSummarizer;
+import com.google.adk.summarizer.EventsCompactionConfig;
 import com.google.genai.types.Content;
 import com.google.genai.types.Part;
 import com.volcengine.veadk.memory.ShortTermMemory;
 import io.reactivex.rxjava3.core.Flowable;
+import io.reactivex.rxjava3.core.Maybe;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -49,6 +54,53 @@ class RunnerTest {
         Runner runner = new Runner(agent, artifacts);
 
         assertThat(runner.artifactService()).isSameAs(artifacts);
+    }
+
+    @Test
+    void constructorWiresEventAndToolResultCompaction() throws Exception {
+        EventAgent agent = new EventAgent("runner_agent", textEvent("runner_agent", "ok"));
+        EventsCompactionConfig config =
+                EventsCompactionConfig.builder()
+                        .compactionInterval(3)
+                        .overlapSize(1)
+                        .summarizer(mock(BaseEventSummarizer.class))
+                        .build();
+        ShortTermMemory memory =
+                ShortTermMemory.builder()
+                        .eventsCompactionConfig(config)
+                        .maxToolResultChars(1000)
+                        .toolResultSummaryChars(400)
+                        .build();
+
+        Runner runner = new Runner(agent, memory);
+
+        var field = com.google.adk.runner.Runner.class.getDeclaredField("eventsCompactionConfig");
+        field.setAccessible(true);
+        assertThat(field.get(runner)).isSameAs(config);
+        assertThat(runner.pluginManager().getPlugin("veadk_tool_result_compression")).isPresent();
+    }
+
+    @Test
+    void eventCompactionSummarizesAfterConfiguredInvocationWindow() {
+        EventAgent agent = new EventAgent("runner_agent", textEvent("runner_agent", "ok"));
+        BaseEventSummarizer summarizer = mock(BaseEventSummarizer.class);
+        when(summarizer.summarizeEvents(org.mockito.ArgumentMatchers.anyList()))
+                .thenReturn(Maybe.empty());
+        ShortTermMemory memory =
+                ShortTermMemory.builder()
+                        .eventsCompactionConfig(
+                                EventsCompactionConfig.builder()
+                                        .compactionInterval(2)
+                                        .overlapSize(0)
+                                        .summarizer(summarizer)
+                                        .build())
+                        .build();
+        Runner runner = new Runner(agent, memory);
+
+        runner.run("user", "session", "first");
+        runner.run("user", "session", "second");
+
+        verify(summarizer).summarizeEvents(org.mockito.ArgumentMatchers.anyList());
     }
 
     @Test

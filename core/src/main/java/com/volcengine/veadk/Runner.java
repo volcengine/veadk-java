@@ -30,6 +30,7 @@ import com.google.common.collect.ImmutableList;
 import com.google.genai.types.Content;
 import com.google.genai.types.Part;
 import com.volcengine.veadk.memory.ShortTermMemory;
+import com.volcengine.veadk.memory.ToolResultCompressionPlugin;
 import io.reactivex.rxjava3.core.Single;
 import java.util.List;
 import java.util.Objects;
@@ -130,20 +131,29 @@ public class Runner extends com.google.adk.runner.Runner {
                 artifactService,
                 services.shortTermMemory().sessionService(),
                 services.memoryService(),
-                contextPlugins(services.shortTermMemory()));
+                contextPlugins(services.shortTermMemory()),
+                services.shortTermMemory().eventsCompactionConfig().orElse(null),
+                null);
         this.shortTermMemory = services.shortTermMemory();
     }
 
     private static List<? extends Plugin> contextPlugins(ShortTermMemory shortTermMemory) {
-        if (shortTermMemory.numRecentInvocationsToKeep().isEmpty()) {
-            return ImmutableList.of();
+        ImmutableList.Builder<Plugin> plugins = ImmutableList.builder();
+        if (shortTermMemory.numRecentInvocationsToKeep().isPresent()) {
+            plugins.add(
+                    ContextFilterPlugin.builder()
+                            .name("veadk_recent_context")
+                            .numInvocationsToKeep(
+                                    shortTermMemory.numRecentInvocationsToKeep().getAsInt())
+                            .build());
         }
-        return ImmutableList.of(
-                ContextFilterPlugin.builder()
-                        .name("veadk_recent_context")
-                        .numInvocationsToKeep(
-                                shortTermMemory.numRecentInvocationsToKeep().getAsInt())
-                        .build());
+        if (shortTermMemory.maxToolResultChars().isPresent()) {
+            plugins.add(
+                    new ToolResultCompressionPlugin(
+                            shortTermMemory.maxToolResultChars().getAsInt(),
+                            shortTermMemory.toolResultSummaryChars()));
+        }
+        return plugins.build();
     }
 
     public ShortTermMemory shortTermMemory() {

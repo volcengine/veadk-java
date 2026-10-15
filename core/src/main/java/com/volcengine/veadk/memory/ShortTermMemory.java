@@ -18,6 +18,7 @@ package com.volcengine.veadk.memory;
 import com.google.adk.sessions.BaseSessionService;
 import com.google.adk.sessions.InMemorySessionService;
 import com.google.adk.sessions.Session;
+import com.google.adk.summarizer.EventsCompactionConfig;
 import io.reactivex.rxjava3.core.Completable;
 import io.reactivex.rxjava3.core.Maybe;
 import io.reactivex.rxjava3.core.Single;
@@ -38,6 +39,9 @@ public final class ShortTermMemory {
     private final String localDatabasePath;
     private final Map<String, Object> backendOptions;
     private final Integer numRecentInvocationsToKeep;
+    private final EventsCompactionConfig eventsCompactionConfig;
+    private final Integer maxToolResultChars;
+    private final int toolResultSummaryChars;
     private final Consumer<Session> afterCreateSessionCallback;
     private final Consumer<Session> afterLoadMemoryCallback;
     private final Function<Session, Completable> afterCreateSessionCallbackAsync;
@@ -50,6 +54,9 @@ public final class ShortTermMemory {
         this.localDatabasePath = Objects.requireNonNullElse(builder.localDatabasePath, "");
         this.backendOptions = Map.copyOf(builder.backendOptions);
         this.numRecentInvocationsToKeep = builder.numRecentInvocationsToKeep;
+        this.eventsCompactionConfig = builder.eventsCompactionConfig;
+        this.maxToolResultChars = builder.maxToolResultChars;
+        this.toolResultSummaryChars = builder.toolResultSummaryChars;
         this.afterCreateSessionCallback = builder.afterCreateSessionCallback;
         this.afterLoadMemoryCallback = builder.afterLoadMemoryCallback;
         this.afterCreateSessionCallbackAsync = builder.afterCreateSessionCallbackAsync;
@@ -94,6 +101,28 @@ public final class ShortTermMemory {
         return numRecentInvocationsToKeep == null
                 ? OptionalInt.empty()
                 : OptionalInt.of(numRecentInvocationsToKeep);
+    }
+
+    /**
+     * ADK event compaction configuration used to summarize older session events.
+     *
+     * <p>ADK's invocation-count sliding compactor appends summary events without deleting the
+     * source events.
+     */
+    public Optional<EventsCompactionConfig> eventsCompactionConfig() {
+        return Optional.ofNullable(eventsCompactionConfig);
+    }
+
+    /** Maximum serialized tool-result size retained in model context. */
+    public OptionalInt maxToolResultChars() {
+        return maxToolResultChars == null
+                ? OptionalInt.empty()
+                : OptionalInt.of(maxToolResultChars);
+    }
+
+    /** Maximum text size used for the compacted tool-result summary. */
+    public int toolResultSummaryChars() {
+        return toolResultSummaryChars;
     }
 
     public Maybe<Session> getSession(String appName, String userId, String sessionId) {
@@ -200,6 +229,9 @@ public final class ShortTermMemory {
         private String localDatabasePath = DEFAULT_LOCAL_DATABASE_PATH;
         private Map<String, Object> backendOptions = new HashMap<>();
         private Integer numRecentInvocationsToKeep;
+        private EventsCompactionConfig eventsCompactionConfig;
+        private Integer maxToolResultChars;
+        private int toolResultSummaryChars = 1200;
         private Consumer<Session> afterCreateSessionCallback;
         private Consumer<Session> afterLoadMemoryCallback;
         private Function<Session, Completable> afterCreateSessionCallbackAsync;
@@ -289,6 +321,44 @@ public final class ShortTermMemory {
             return this;
         }
 
+        /**
+         * Enables ADK-native conversation summarization.
+         *
+         * <p>Use {@link EventsCompactionConfig#builder()} to configure either an invocation sliding
+         * window with {@code compactionInterval} and {@code overlapSize}. A custom summarizer is
+         * optional; ADK derives an LLM summarizer from the root agent when possible.
+         */
+        public Builder eventsCompactionConfig(EventsCompactionConfig eventsCompactionConfig) {
+            this.eventsCompactionConfig =
+                    Objects.requireNonNull(
+                            eventsCompactionConfig, "eventsCompactionConfig must be set.");
+            return this;
+        }
+
+        /**
+         * Compresses oversized tool results before they are added to subsequent model requests.
+         *
+         * <p>Status and error fields, bounded structured facts, and head/tail text evidence are
+         * preserved. The original tool call/result pairing remains managed by ADK.
+         */
+        public Builder maxToolResultChars(int maxToolResultChars) {
+            if (maxToolResultChars < 256) {
+                throw new IllegalArgumentException(
+                        "maxToolResultChars must be greater than or equal to 256.");
+            }
+            this.maxToolResultChars = maxToolResultChars;
+            return this;
+        }
+
+        public Builder toolResultSummaryChars(int toolResultSummaryChars) {
+            if (toolResultSummaryChars < 128) {
+                throw new IllegalArgumentException(
+                        "toolResultSummaryChars must be greater than or equal to 128.");
+            }
+            this.toolResultSummaryChars = toolResultSummaryChars;
+            return this;
+        }
+
         public Builder sessionService(BaseSessionService sessionService) {
             this.backend = Backend.CUSTOM;
             this.sessionService =
@@ -321,6 +391,10 @@ public final class ShortTermMemory {
         }
 
         public ShortTermMemory build() {
+            if (maxToolResultChars != null && toolResultSummaryChars >= maxToolResultChars) {
+                throw new IllegalArgumentException(
+                        "toolResultSummaryChars must be less than maxToolResultChars.");
+            }
             return new ShortTermMemory(this);
         }
 
