@@ -27,6 +27,19 @@ Agent agent = Agent.builder()
 
 工具实现可通过 `IdentityCredentials.workloadToken(...)`、`apiKey(...)` 或 `oauth2(...)` 获取受管凭证，再注入实际的出站请求。API Key 按 Agent、用户、Provider 缓存；OAuth2 用户联邦可能返回 `AUTHORIZATION_URL`，调用方应展示给用户完成授权。
 
+需要自动完成 OAuth2 授权并恢复工具调用时，可包装任意 ADK `BaseTool`：
+
+```java
+BaseTool authorizedTool = IdentityOAuth2Tool.builder(calendarTool, credentials)
+        .providerName("calendar")
+        .credentialArgument("access_token")
+        .scopes(List.of("calendar.read"))
+        .onAuthorizationUrl(url -> sendAuthorizationUrlToUser(url))
+        .build();
+```
+
+包装器会从模型可见的工具声明中移除 `access_token`，并覆盖模型意外传入的同名参数。Identity 直接返回 Token 时立即执行原工具；返回授权 URL 时先通知应用，再轮询授权结果。取得 Token 后只执行一次原工具；默认每 2 秒轮询、5 分钟超时，可通过 `pollInterval(...)` 与 `authorizationTimeout(...)` 调整。应用必须提供 URL 回调，避免授权链接被静默丢弃或写入日志。
+
 `AgentSecurity` 会先执行工具权限检查；拒绝时不会调用 LLM Shield 或实际工具。通过后再审核工具参数，工具执行后审核结果。
 
 ## 配置
@@ -53,6 +66,7 @@ Identity 工作负载令牌按 `workload_token:{agent}:{user}` 缓存在 ADK Ses
 
 - 对齐：Agent 权限的主体、`invoke` 操作、Agent 资源与原始调用链；授权拒绝或异常均 fail-closed。
 - 对齐：支持工作负载令牌、受管 API Key，以及返回 Access Token 或 Authorization URL 的 OAuth2 流程。
+- 对齐：OAuth2 授权 URL 通知、Token 轮询及授权完成后自动恢复原工具调用；适配 Java ADK 1.9.0 缺少凭证事件的差异，在同一次异步工具调用内完成闭环。
 - 对齐：LLM Shield 审核最后一条用户消息、模型输出、工具参数与工具结果；风险文案和 101/103/104/106/107 分类一致。
 - 对齐：Shield 网络、配置或响应异常默认 `FailureMode.ALLOW`，保持 Python fail-open；Java 额外提供 `BLOCK`。
 - Java 扩展：实现 User → Agent → Tool 的工具级权限检查，工具资源 ID 使用 `BaseTool.name()`；当前 Python 仅直接接入 Agent 检查。
