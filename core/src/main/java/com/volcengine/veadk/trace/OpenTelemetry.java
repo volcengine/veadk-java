@@ -23,6 +23,10 @@ import io.opentelemetry.api.GlobalOpenTelemetry;
 import io.opentelemetry.api.common.AttributeKey;
 import io.opentelemetry.api.common.Attributes;
 import io.opentelemetry.sdk.OpenTelemetrySdk;
+import io.opentelemetry.sdk.OpenTelemetrySdkBuilder;
+import io.opentelemetry.sdk.metrics.SdkMeterProvider;
+import io.opentelemetry.sdk.metrics.SdkMeterProviderBuilder;
+import io.opentelemetry.sdk.metrics.export.MetricReader;
 import io.opentelemetry.sdk.resources.Resource;
 import io.opentelemetry.sdk.trace.SdkTracerProvider;
 import io.opentelemetry.sdk.trace.export.BatchSpanProcessor;
@@ -52,10 +56,10 @@ public class OpenTelemetry {
                         .setExporterTimeout(30, TimeUnit.SECONDS)
                         .build();
 
-        SdkTracerProvider tracerProvider =
-                SdkTracerProvider.builder()
-                        .addSpanProcessor(batchProcessor)
-                        .setResource(
+        Resource resource =
+                exporterFactories.stream()
+                        .map(ExporterFactory::resource)
+                        .reduce(
                                 Resource.getDefault()
                                         .merge(
                                                 Resource.create(
@@ -65,13 +69,42 @@ public class OpenTelemetry {
                                                                 "veadk_tracing",
                                                                 AttributeKey.stringKey(
                                                                         "service.version"),
-                                                                Version.JAVA_VEADK_VERSION))))
+                                                                Version.JAVA_VEADK_VERSION))),
+                                Resource::merge);
+
+        SdkTracerProvider tracerProvider =
+                SdkTracerProvider.builder()
+                        .addSpanProcessor(batchProcessor)
+                        .setResource(resource)
                         .build();
 
-        OpenTelemetrySdk.builder().setTracerProvider(tracerProvider).buildAndRegisterGlobal();
+        List<MetricReader> metricReaders =
+                exporterFactories.stream()
+                        .map(ExporterFactory::metricReader)
+                        .flatMap(java.util.Optional::stream)
+                        .toList();
+        SdkMeterProvider meterProvider = null;
+        OpenTelemetrySdkBuilder sdkBuilder =
+                OpenTelemetrySdk.builder().setTracerProvider(tracerProvider);
+        if (!metricReaders.isEmpty()) {
+            SdkMeterProviderBuilder meterProviderBuilder =
+                    SdkMeterProvider.builder().setResource(resource);
+            metricReaders.forEach(meterProviderBuilder::registerMetricReader);
+            meterProvider = meterProviderBuilder.build();
+            sdkBuilder.setMeterProvider(meterProvider);
+        }
+
+        sdkBuilder.buildAndRegisterGlobal();
 
         Tracing.setTracerForTesting(GlobalOpenTelemetry.getTracer("veadk"));
 
-        Runtime.getRuntime().addShutdownHook(new Thread(tracerProvider::close));
+        SdkMeterProvider finalMeterProvider = meterProvider;
+        Runtime.getRuntime()
+                .addShutdownHook(
+                        new Thread(
+                                () -> {
+                                    tracerProvider.close();
+                                    if (finalMeterProvider != null) finalMeterProvider.close();
+                                }));
     }
 }

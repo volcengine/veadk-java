@@ -15,8 +15,19 @@
  */
 package com.volcengine.veadk.trace.exporter;
 
+import io.opentelemetry.sdk.metrics.export.MetricReader;
+import io.opentelemetry.sdk.resources.Resource;
 import io.opentelemetry.sdk.trace.export.SpanExporter;
+import java.util.Optional;
 
 public interface ExporterFactory {
     SpanExporter create();
+
+    default Resource resource() {
+        return Resource.empty();
+    }
+
+    default Optional<MetricReader> metricReader() {
+        return Optional.empty();
+    }
 }
