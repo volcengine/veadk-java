@@ -27,8 +27,6 @@ import com.google.genai.types.FunctionCall;
 import com.google.genai.types.GenerateContentResponseUsageMetadata;
 import com.google.genai.types.Part;
 import com.volcengine.ark.runtime.exception.ArkHttpException;
-import com.volcengine.ark.runtime.model.completion.chat.ChatMessage;
-import com.volcengine.ark.runtime.model.completion.chat.ChatMessageRole;
 import com.volcengine.ark.runtime.model.responses.common.ResponsesThinking;
 import com.volcengine.ark.runtime.model.responses.content.OutputContentItemText;
 import com.volcengine.ark.runtime.model.responses.event.ErrorEvent;
@@ -40,7 +38,6 @@ import com.volcengine.ark.runtime.model.responses.item.BaseItem;
 import com.volcengine.ark.runtime.model.responses.item.InputItem;
 import com.volcengine.ark.runtime.model.responses.item.ItemEasyMessage;
 import com.volcengine.ark.runtime.model.responses.item.ItemFunctionToolCall;
-import com.volcengine.ark.runtime.model.responses.item.ItemFunctionToolCallOutput;
 import com.volcengine.ark.runtime.model.responses.item.ItemOutputMessage;
 import com.volcengine.ark.runtime.model.responses.item.MessageContent;
 import com.volcengine.ark.runtime.model.responses.request.CreateResponsesRequest;
@@ -163,14 +160,6 @@ final class ArkResponsesAdapter {
     }
 
     private CreateResponsesRequest toRequest(LlmRequest request, boolean reuse) {
-        for (Content content : request.contents()) {
-            for (Part part : content.parts().orElse(List.of())) {
-                if (part.inlineData().isPresent() || part.fileData().isPresent()) {
-                    throw new IllegalArgumentException(
-                            "Ark Responses image/file input is not supported by this adapter yet.");
-                }
-            }
-        }
         CreateResponsesRequest wire = new CreateResponsesRequest();
         wire.setModel(request.model().orElse(config.getModelName()));
         wire.setStore(config.isResponsesStore());
@@ -191,7 +180,7 @@ final class ArkResponsesAdapter {
                                     .ifPresent(value -> wire.setMaxOutputTokens(value.longValue()));
                             wire.setText(ArkStructuredOutput.responsesFormat(generation));
                         });
-        List<ChatMessage> messages = new ArkChatHistoryMapper().map(request.contents());
+        List<InputItem> messages = new ArkResponsesInputMapper().map(request.contents());
         int skip = 0;
         if (reuse && config.isResponsesStore()) {
             JsonNode continuation = continuation(request);
@@ -203,7 +192,10 @@ final class ArkResponsesAdapter {
                             .equals(continuation.path("prefix").asText())
                     && !continuation.path("id").asText().isBlank()) {
                 wire.setPreviousResponseId(continuation.path("id").asText());
-                skip = new ArkChatHistoryMapper().map(request.contents().subList(0, count)).size();
+                skip =
+                        new ArkResponsesInputMapper()
+                                .map(request.contents().subList(0, count))
+                                .size();
             }
         }
         List<InputItem> input = new ArrayList<>();
@@ -213,32 +205,7 @@ final class ArkResponsesAdapter {
             var tools = tools(request);
             if (!tools.isEmpty()) wire.setTools(tools);
         }
-        for (ChatMessage chat : messages.subList(skip, messages.size())) {
-            if (chat.getRole() == ChatMessageRole.TOOL) {
-                ItemFunctionToolCallOutput result = new ItemFunctionToolCallOutput();
-                result.setCallId(chat.getToolCallId());
-                result.setOutput((String) chat.getContent());
-                input.add(result);
-            } else {
-                if (chat.getContent() instanceof String text && !text.isEmpty()) {
-                    input.add(
-                            message(
-                                    chat.getRole().toString().toLowerCase(java.util.Locale.ROOT),
-                                    text));
-                }
-                if (chat.getToolCalls() != null) {
-                    chat.getToolCalls()
-                            .forEach(
-                                    call -> {
-                                        ItemFunctionToolCall item = new ItemFunctionToolCall();
-                                        item.setName(call.getFunction().getName());
-                                        item.setCallId(call.getId());
-                                        item.setArguments(call.getFunction().getArguments());
-                                        input.add(item);
-                                    });
-                }
-            }
-        }
+        input.addAll(messages.subList(skip, messages.size()));
         ResponsesInput responsesInput = new ResponsesInput();
         responsesInput.setListValue(input);
         wire.setInput(responsesInput);

@@ -61,3 +61,6 @@ See [Built-in web fetch](builtin-web-fetch.md) for web-fetch limits, redirect va
 protection, and cache behavior. The AgentKit Java runtime example currently supports `web_fetch`
 through `AGENTKIT_TOOLS`; configure the other tools directly on an agent when their credentials or
 toolset lifecycle are required.
+
+Image generation, image editing, and asynchronous video generation are documented separately in
+[Multimodal and files](multimodal-files.md).

@@ -68,10 +68,10 @@ var generation = GenerateContentConfig.builder()
   -Dexec.args=stream
 ```
 
-示例连续生成两个 JSON 对象，验证 Schema 输出值、响应 ID 和用量。会产生真实模型调用。当前 Responses 适配支持文本与函数工具；图片和文件输入尚未接入，传入时明确报错。
+示例连续生成两个 JSON 对象，验证 Schema 输出值、响应 ID 和用量。会产生真实模型调用。Responses 同时支持文本、函数工具、图片、视频和文件输入，附件上传与混合输入示例见 [多模态与文件](multimodal-files.md)。
 
 ## English
 
 Select `ArkLlmConfig.Api.RESPONSES` explicitly; Chat Completions remains the default. Register both `ArkResponsesSession` callbacks to persist continuation in session state, scoped by agent name. The adapter reuses a previous response only when the complete history prefix and configuration match. An expired response triggers one full-history retry before any output; other errors and interrupted/incomplete streams propagate.
 
-Responses uses `store=true` by default. Set `responsesStore(false)` to disable remote response storage and continuation. For direct calls, retain full history and use `continueFrom`; read the returned ID with `responseId`. Configure either `responseSchema` or `responseJsonSchema` for strict JSON Schema output in either protocol. The example above validates two live structured turns. Current input support covers text and function tools.
+Responses uses `store=true` by default. Set `responsesStore(false)` to disable remote response storage and continuation. For direct calls, retain full history and use `continueFrom`; read the returned ID with `responseId`. Configure either `responseSchema` or `responseJsonSchema` for strict JSON Schema output in either protocol. The example above validates two live structured turns. Input support covers text, function tools, images, videos, and files.

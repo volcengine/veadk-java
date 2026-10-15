@@ -17,6 +17,7 @@ package com.volcengine.veadk;
 
 import com.google.adk.agents.BaseAgent;
 import com.google.adk.agents.RunConfig;
+import com.google.adk.artifacts.BaseArtifactService;
 import com.google.adk.artifacts.InMemoryArtifactService;
 import com.google.adk.events.Event;
 import com.google.adk.memory.BaseMemoryService;
@@ -56,6 +57,14 @@ public class Runner extends com.google.adk.runner.Runner {
         this(agent, appName, shortTermMemory, memoryServiceFrom(agent));
     }
 
+    public Runner(BaseAgent agent, BaseArtifactService artifactService) {
+        this(agent, agent.name(), artifactService);
+    }
+
+    public Runner(BaseAgent agent, String appName, BaseArtifactService artifactService) {
+        this(agent, appName, (ShortTermMemory) null, memoryServiceFrom(agent), artifactService);
+    }
+
     public Runner(BaseAgent agent, BaseMemoryService baseMemoryService) {
         this(agent, agent.name(), baseMemoryService);
     }
@@ -70,7 +79,24 @@ public class Runner extends com.google.adk.runner.Runner {
             String appName,
             ShortTermMemory shortTermMemory,
             BaseMemoryService baseMemoryService) {
-        this(agent, appName, resolveServices(agent, shortTermMemory, baseMemoryService));
+        this(
+                agent,
+                appName,
+                resolveServices(agent, shortTermMemory, baseMemoryService),
+                new InMemoryArtifactService());
+    }
+
+    public Runner(
+            BaseAgent agent,
+            String appName,
+            ShortTermMemory shortTermMemory,
+            BaseMemoryService baseMemoryService,
+            BaseArtifactService artifactService) {
+        this(
+                agent,
+                appName,
+                resolveServices(agent, shortTermMemory, baseMemoryService),
+                Objects.requireNonNull(artifactService, "artifactService must be set."));
     }
 
     public Runner(
@@ -90,14 +116,18 @@ public class Runner extends com.google.adk.runner.Runner {
     }
 
     @SuppressWarnings("deprecation")
-    private Runner(BaseAgent agent, String appName, ResolvedServices services) {
+    private Runner(
+            BaseAgent agent,
+            String appName,
+            ResolvedServices services,
+            BaseArtifactService artifactService) {
         // ADK prefers Runner.builder() for direct construction, but Java subclass constructors
         // must call a superclass constructor. Keep inheritance to preserve ADK Runner
         // compatibility.
         super(
                 agent,
                 appName,
-                new InMemoryArtifactService(),
+                artifactService,
                 services.shortTermMemory().sessionService(),
                 services.memoryService(),
                 contextPlugins(services.shortTermMemory()));

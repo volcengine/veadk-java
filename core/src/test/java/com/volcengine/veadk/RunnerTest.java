@@ -22,6 +22,7 @@ import static org.mockito.Mockito.mock;
 import com.google.adk.agents.BaseAgent;
 import com.google.adk.agents.InvocationContext;
 import com.google.adk.agents.RunConfig;
+import com.google.adk.artifacts.InMemoryArtifactService;
 import com.google.adk.events.Event;
 import com.google.adk.memory.BaseMemoryService;
 import com.google.adk.models.BaseLlm;
@@ -39,6 +40,16 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
 class RunnerTest {
+
+    @Test
+    void constructorUsesExplicitArtifactService() {
+        EventAgent agent = new EventAgent("runner_agent", textEvent("runner_agent", "ok"));
+        var artifacts = new InMemoryArtifactService();
+
+        Runner runner = new Runner(agent, artifacts);
+
+        assertThat(runner.artifactService()).isSameAs(artifacts);
+    }
 
     @Test
     void runStringCreatesSessionWithDefaultUser() {

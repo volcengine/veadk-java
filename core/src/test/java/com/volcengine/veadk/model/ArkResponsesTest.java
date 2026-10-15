@@ -170,6 +170,55 @@ class ArkResponsesTest {
     }
 
     @Test
+    void responsesPreservesMixedTextAndInlineImageParts() throws Exception {
+        when(service.createResponse(any())).thenReturn(raw("r1", "seen"));
+        Content content =
+                Content.builder()
+                        .role("user")
+                        .parts(
+                                Part.fromText("What is shown?"),
+                                Part.fromBytes(new byte[] {1, 2, 3}, "image/png"))
+                        .build();
+
+        llm.generateContent(LlmRequest.builder().contents(List.of(content)).build(), false)
+                .blockingFirst();
+
+        JsonNode parts = wire(captured(1).get(0)).path("input").get(0).path("content");
+        assertThat(parts).hasSize(2);
+        assertThat(parts.get(0).path("type").asText()).isEqualTo("input_text");
+        assertThat(parts.get(0).path("text").asText()).isEqualTo("What is shown?");
+        assertThat(parts.get(1).path("type").asText()).isEqualTo("input_image");
+        assertThat(parts.get(1).path("image_url").asText()).isEqualTo("data:image/png;base64,AQID");
+        assertThat(parts.get(1).path("detail").asText()).isEqualTo("auto");
+    }
+
+    @Test
+    void responsesMapsImageUrlVideoUrlAndUploadedFileId() throws Exception {
+        when(service.createResponse(any())).thenReturn(raw("r1", "seen"));
+        Content content =
+                Content.builder()
+                        .role("user")
+                        .parts(
+                                Part.fromUri("https://example.test/photo.webp", "image/webp"),
+                                Part.fromUri("https://example.test/clip.mp4", "video/mp4"),
+                                Part.fromUri("file_id://file-123", "application/pdf"))
+                        .build();
+
+        llm.generateContent(LlmRequest.builder().contents(List.of(content)).build(), false)
+                .blockingFirst();
+
+        JsonNode parts = wire(captured(1).get(0)).path("input").get(0).path("content");
+        assertThat(parts.get(0).path("type").asText()).isEqualTo("input_image");
+        assertThat(parts.get(0).path("image_url").asText())
+                .isEqualTo("https://example.test/photo.webp");
+        assertThat(parts.get(1).path("type").asText()).isEqualTo("input_video");
+        assertThat(parts.get(1).path("video_url").asText())
+                .isEqualTo("https://example.test/clip.mp4");
+        assertThat(parts.get(2).path("type").asText()).isEqualTo("input_file");
+        assertThat(parts.get(2).path("file_id").asText()).isEqualTo("file-123");
+    }
+
+    @Test
     void toolResponseKeepsCallIdAndUsageThenReusesOnlyToolResult() throws Exception {
         var rawTool = rawTool("r1");
         when(service.createResponse(any())).thenReturn(rawTool, raw("r2", "done"));
