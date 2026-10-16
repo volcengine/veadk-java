@@ -79,3 +79,30 @@ server health on construction and can return all cards in a group or filter by a
 | Python tool source can compile Python at runtime | Java accepts injected `ResourceSource` objects containing Java tools/toolsets | Runtime Python execution is not part of the Java SDK. |
 
 These differences are explicit; no unsupported option silently changes behavior.
+
+## A2A execution lifecycle (development)
+
+`VeA2AServer` now uses `VeA2AExecutor`, which can also be passed to the official A2A
+JSON-RPC transport. Supply the same session, artifact and memory services as the
+hosting application, and call `requestHandler(taskStore, queueManager, executor)`
+to align the request handler timeout with the execution budget.
+
+The executor creates the session with the explicit A2A context ID before ADK's
+lookup. Repeated messages in that context retain history. It waits until the final
+event is queued before returning from `execute`, so a slow model does not cause a
+blocking `message/send` to return a prematurely closed `working` task. Supplied
+agents and services remain caller-owned.
+
+Timeout and interruption cancel the A2A task and release the waiting producer.
+**Known release blocker:** ADK 1.11's `BaseLlmFlow` uses `Flowable.cache()`, which
+retains the model subscription after downstream cancellation. This adapter cannot
+force an already running model request to stop through ADK's public executor API.
+Closing the shared agent would interrupt unrelated tasks, so the adapter does not
+do that. `A2AExecutionLifecycleTest.timeoutCancelsModel` and
+`interruptedProducerCancelsWorkAndRejectsDuplicateExecution` deliberately retain
+the failing resource-release assertions. Task-state cancellation alone is not
+proof that model work stopped.
+
+Verification builds use a separately installed `0.0.3-SNAPSHOT`; the published
+`0.0.2` artifact is not replaced. Do not release this development change as full
+Python lifecycle parity until the cancellation defect is resolved.

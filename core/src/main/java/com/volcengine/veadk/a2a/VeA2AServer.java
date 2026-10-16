@@ -15,8 +15,6 @@
  */
 package com.volcengine.veadk.a2a;
 
-import com.google.adk.a2a.executor.AgentExecutor;
-import com.google.adk.a2a.executor.AgentExecutorConfig;
 import com.google.adk.artifacts.InMemoryArtifactService;
 import com.google.adk.memory.InMemoryMemoryService;
 import com.sun.net.httpserver.HttpExchange;
@@ -67,28 +65,22 @@ public final class VeA2AServer implements AutoCloseable {
             Duration blockingTimeout) {
         Objects.requireNonNull(agent, "agent must be set.");
         Objects.requireNonNull(shortTermMemory, "shortTermMemory must be set.");
+        requirePositiveSeconds(blockingTimeout);
         this.agentCard = AgentCards.fromAgent(agent, requireText(url, "url must be set."));
         this.executor = Executors.newCachedThreadPool(new DaemonThreadFactory("veadk-a2a"));
 
-        AgentExecutor agentExecutor =
-                new AgentExecutor.Builder()
-                        .agent(agent)
-                        .appName(requireText(appName, "appName must be set."))
-                        .artifactService(new InMemoryArtifactService())
-                        .sessionService(shortTermMemory.sessionService())
-                        .memoryService(
-                                agent.longTermMemoryService().orElseGet(InMemoryMemoryService::new))
-                        .agentExecutorConfig(AgentExecutorConfig.builder().build())
-                        .build();
+        VeA2AExecutor agentExecutor =
+                new VeA2AExecutor(
+                        agent,
+                        requireText(appName, "appName must be set."),
+                        shortTermMemory.sessionService(),
+                        new InMemoryArtifactService(),
+                        agent.longTermMemoryService().orElseGet(InMemoryMemoryService::new),
+                        blockingTimeout);
         InMemoryTaskStore taskStore = new InMemoryTaskStore();
         InMemoryQueueManager queueManager = new InMemoryQueueManager(taskStore);
         DefaultRequestHandler requestHandler =
-                RequestHandlerTimeouts.create(
-                        agentExecutor,
-                        taskStore,
-                        queueManager,
-                        executor,
-                        requirePositiveSeconds(blockingTimeout));
+                agentExecutor.requestHandler(taskStore, queueManager, executor);
         this.restHandler = new RestHandler(agentCard, requestHandler, executor);
     }
 
