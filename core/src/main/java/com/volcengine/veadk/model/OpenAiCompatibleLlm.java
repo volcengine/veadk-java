@@ -23,6 +23,7 @@ import com.google.adk.models.chat.ChatCompletionsClient;
 import com.google.adk.models.chat.ChatCompletionsHttpClient;
 import com.google.genai.types.HttpOptions;
 import io.reactivex.rxjava3.core.Flowable;
+import java.util.Collection;
 import java.util.Map;
 import java.util.Objects;
 
@@ -49,7 +50,22 @@ public final class OpenAiCompatibleLlm extends BaseLlm {
 
     @Override
     public Flowable<LlmResponse> generateContent(LlmRequest llmRequest, boolean stream) {
-        return client.complete(llmRequest.toBuilder().model(model()).build(), stream);
+        return ModelResponseId.trace(
+                () -> {
+                    ModelResponseId.Attempt attempt = ModelResponseId.beginAttempt();
+                    return client.complete(llmRequest.toBuilder().model(model()).build(), stream)
+                            .doOnNext(
+                                    response ->
+                                            response.customMetadata().stream()
+                                                    .flatMap(Collection::stream)
+                                                    .filter(
+                                                            value ->
+                                                                    value.key()
+                                                                            .filter("id"::equals)
+                                                                            .isPresent())
+                                                    .flatMap(value -> value.stringValue().stream())
+                                                    .forEach(attempt::body));
+                });
     }
 
     @Override
