@@ -9,8 +9,8 @@
 | 需求来源 | GitHub MR 同步；[Python #1223](https://github.com/volcengine/veadk-python/pull/1223) |
 | 增量 | 模型请求 Span 新增 TPOT 属性；同名 Histogram 请求级单样本；首末有效增量单调计时；真实终态、最终 usage、完整消费/清理及保守省略契约 |
 | 源基线 | 1763e5a548a952449d87e0ccfc11c2ec8d78c8cc；2026-11-18 09:25:19 UTC 合并；7 文件 +909/-25 |
-| Java 基线 | 2026-11-20 最新 origin/main=4a5ed7f7f5ebb6d6f475995e3ad0904c5d8d295e；Context 4 main；工作分支 feat/d9ce411f-2lhv |
-| 关联工作项 | 7398797820；负责人/RD 单春华；PMO 丁彦俊 |
+| Java 基线 | 2026-11-25 显式 fetch main 后 origin/main=4a5ed7f7f5ebb6d6f475995e3ad0904c5d8d295e；Context 5 main；工作分支 feat/d9ce411f-2lhv；初始 HEAD=c5d5c1e41ae3da01b4eecd31fa1234d909c6af7d 仅含本需求文档增量 |
+| 关联工作项 | 7398797820；负责人/RD及共享指标契约协调人：单春华；PMO 丁彦俊；P3 |
 | 去重 | 创建前去重证据沿用需求输入；当前任务为既有 Java 任务，未另建需求。历史 7390714084/7370916011 的上线信息不等同本次 Java 增量已实现 |
 
 TPOT 直接支持模型流式性能评估，属于 VeADK 核心 Model / Observability 与火山 Ark 适配能力，应保持跨语言指标语义。Python Studio、Harness、CLI、MPA、Codex Runtime、packaging 和 typing-only 不纳入本次同步；本 MR 的 LiteLLM 内部兼容实现也不复制。
@@ -100,3 +100,9 @@ Java baseline regression: 46 tests, 0 failures, 0 errors, 0 skipped
 ```
 
 Java 现有 call_llm 输出 Token=100 且 ADK 指标已导出，仍缺本契约 TPOT；Python 原测试在同样 0.99 秒/100 Token 条件断言 TPOT=0.01、count=1；正常终态与尾部延迟判定差异由此可核验。Java 新增埋点的完整正向验收尚待开发，不把基线零采集结果记为目标功能验收通过。
+
+## 本轮复验
+
+2026-11-25 在同一 Java main 提交重新完成四项本地 E2E、46 项相关回归及源 Python 72 项契约测试；结果与前次一致。新增独立文件断言确认 stream/include_usage 为 true、正常/尾部/length 各一个 call_llm 且 output_tokens=100，Reader 可用而本契约 TPOT 缺失。完整可执行命令、追加校验代码与结果见 [验证记录](validation.md)“本轮复验与节点交付核对”，飞书 PRD 同节包含全文。
+
+共享指标契约协调人为单春华；继续采用 REQ-003 的保守省略边界，清理成功证据与云端计数范围由下游设计和 E2E 核对，版本由维护者确定。未实施 Java 新埋点，未执行真实云请求。

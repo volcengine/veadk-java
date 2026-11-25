@@ -19,10 +19,10 @@
 | 来源 | [Python MR #1223](https://github.com/volcengine/veadk-python/pull/1223)，feat(tracing): record streaming time per output token |
 | 源基线 | 合并于 2026-11-18 09:25:19 UTC；1763e5a548a952449d87e0ccfc11c2ec8d78c8cc；7 文件，+909/-25 |
 | 目标仓库 | volcengine/veadk-java；Model、Observability；ArkLlm.java、trace/OpenTelemetry.java 及现有 exporter 接入 |
-| 调研基线 | 2026-11-20 fetch 后 origin/main = 4a5ed7f7f5ebb6d6f475995e3ad0904c5d8d295e，与输入基线一致 |
+| 调研基线 | 2026-11-25 显式 fetch main 后 origin/main = 4a5ed7f7f5ebb6d6f475995e3ad0904c5d8d295e，与输入及前次验证基线一致；初始工作分支 HEAD=c5d5c1e41ae3da01b4eecd31fa1234d909c6af7d，仅比 main 多本需求文档 |
 | 交付分支 | feat/d9ce411f-2lhv；基线 main；此节点交付文档，业务实现属于下游开发节点 |
-| 共享上下文 | Context 4，task_detail，repository_resolution=resolved；Java base_branch=main |
-| 人员 | 需求负责人/RD 单春华；PMO 丁彦俊；Meego 最新回读确认 create_by 为单春华；源 MR author wujiaming-ai，commit author 信息沿用输入 |
+| 共享上下文 | Context 5，task_detail，repository_resolution=resolved；Java base_branch=main；复用既有工作分支与飞书需求目录 |
+| 人员 | 需求负责人/RD及共享指标契约协调人：单春华；PMO 丁彦俊；Meego 最新回读确认 create_by 为单春华、优先级 P3；源 MR author wujiaming-ai，commit author 信息沿用输入 |
 
 目标用户为排查模型流式生成性能的开发者和运维人员。现有请求总时长无法分离首输出前等待与生成阶段；本次让用户可以按相同模型指标比较 Java 与 Python 的生成速度。TPOT 是一次 SDK 观测调用的平均秒/输出 Token，并非客户端渲染速度。
 
@@ -43,7 +43,7 @@
 
 本需求为功能同步缺口，不判定既有 SDK 生命周期行为为需一并修复的 Bug。本次验证走实际 VeADK Agent → Runner → ArkLlm → 官方 Ark SDK → 本地 HTTP SSE，并分别读取用户输出与 OTel 导出；源码来自最新 main，不修改实现。真实云调用在此节点跳过：可控服务可提供间隔、usage 与终态，且任务未指定真实模型端点/云资源；本地结果不能证明云端字段和清理可观测性。无 AgentKit 控制台交互，无控制台 agentId；本地标识 tpot_java_probe / probe-user / probe-session。
 
-实际结果：Java 四项本地 E2E（正常、尾部 5 秒、length、缺终态）确认无 model_request/TPOT；正常/尾部/length 返回 hello world，缺终态传播 IllegalStateException；模型输出 Token=100 已出现在现有 call_llm。46 项 Java 相关基线回归通过；Python 源 MR 72 项契约测试通过。详细过程见附录。
+2026-11-25 复验结果：Java 四项本地 E2E（正常、尾部 5 秒、length、缺终态）确认无 model_request/TPOT；正常/尾部/length 返回 hello world，缺终态传播 IllegalStateException；模型输出 Token=100 已出现在现有 call_llm。46 项 Java 相关基线回归通过；Python 源 MR 72 项契约测试通过。详细过程见附录。
 
 ## 3. 需求范围与行为
 
@@ -423,3 +423,56 @@ PASS: baseline gap confirmed through Agent/Runner + real Ark SDK + HTTP SSE + OT
 实际 call_llm Span 含 gen_ai.request.model=tpot-probe-normal、gen_ai.usage.input_tokens=5、gen_ai.usage.output_tokens=100；Reader 同时导出 ADK workflow/invocation 指标，证明观测管线已启用。普通/尾部 5 秒均返回 hello world；length 当前也返回 hello world，但将来必须省略 TPOT；缺少 finish reason 则传播原 IllegalStateException。四种场景均无 model_request/TPOT，确认当前核心观测缺口。
 
 **验证结论：需要同步；Java 缺口已端到端确认。** 本次未覆盖 Java 新 TPOT 的精确值、采样关闭、清理失败、并发重试等正向验收，因为功能尚未实现；这些在 PRD 第 4 节作为开发/E2E 必须完成的验证，不能以此基线测试替代。
+
+## 本轮复验与节点交付核对
+
+**2026-11-25 复验：Java 同步缺口仍存在，原产品契约无需调整。** 显式拉取 main 后仍为 4a5ed7f7f5ebb6d6f475995e3ad0904c5d8d295e；初始工作分支 c5d5c1e41ae3da01b4eecd31fa1234d909c6af7d 仅包含本需求文档。仓库集合 Context 5 / resolved；历史产物 manifest 为空，但 Git 与指定飞书目录存在同名文档，已复用。
+
+- 本轮工具：Linux x86_64、临时 JDK 17.0.21.1、Maven 3.9.9。Maven Wrapper 的 Central 下载失败后，从 Aliyun 下载相同 3.9.9；临时 JDK 补入环境已提供的代理 CA 后正常校验证书。没有禁用 TLS 校验、修改产品依赖或把验证源码加入 Git。
+- 本轮重新按上方代码块生成 /tmp/veadk-tpot-probe 四份程序；通过 git archive origin/main 构建独立副本。Java 依赖仍为 ADK 1.11.0 / Ark 0.2.48 / OTel 1.62.0；Python 仍为 ADK 2.11.0 / LiteLLM 1.83.14 / OTel 1.42.1 / volcengine-python-sdk 5.0.56。
+- 再次读取 ADK v1.11.0 Tracing、Ark 0.2.48 官方 sources 和固定 LangChain4j commit：流完成不等于清理成功；partial 回调不等于一个 Token。原差异化要求成立。
+
+本轮命令（工作区根目录；`tpot_tools` 指向临时下载并解压的工具目录，沿用上方 Maven settings、用户程序与 fixture）：
+
+```bash
+git -C repos/volcengine_veadk-java fetch origin refs/heads/main:refs/remotes/origin/main
+git -C repos/volcengine_veadk-java rev-parse origin/main
+tpot_tools="$PWD/scratch/tpot-research"
+export JAVA_HOME="$tpot_tools/jdk-17.0.21.1+2"
+"$JAVA_HOME/bin/keytool" -importcert -noprompt -trustcacerts -alias veadk-probe-env-ca-0 -file /usr/local/share/ca-certificates/aio-proxy-ca-custom.crt -keystore "$JAVA_HOME/lib/security/cacerts" -storepass changeit
+"$tpot_tools/apache-maven-3.9.9/bin/mvn" -s /tmp/veadk-tpot-maven-settings.xml -f /tmp/veadk-tpot-validation/pom.xml -pl core -am -DskipTests package
+"$tpot_tools/apache-maven-3.9.9/bin/mvn" -q -s /tmp/veadk-tpot-maven-settings.xml -f /tmp/veadk-tpot-validation/core/pom.xml dependency:build-classpath -Dmdep.outputFile=/tmp/veadk-tpot-probe/classpath.txt
+"$tpot_tools/apache-maven-3.9.9/bin/mvn" -B -ntp -s /tmp/veadk-tpot-maven-settings.xml -f /tmp/veadk-tpot-validation/pom.xml -pl core -am -Dtest=ArkLlmMappingTest,ArkResponsesTest,OpenTelemetryTest -Dsurefire.failIfNoSpecifiedTests=false test
+# 按上方运行命令启动 fixture，用本轮 JDK 的 javac/java 运行四个场景，再执行 verify.py
+/opt/python3.12/bin/python3.12 /tmp/veadk-tpot-probe/verify_metadata.py
+PYTHONPATH="$tpot_tools/veadk-python-1763e5a548a952449d87e0ccfc11c2ec8d78c8cc" "$tpot_tools/pyenv/bin/python" -m pytest -q "$tpot_tools/veadk-python-1763e5a548a952449d87e0ccfc11c2ec8d78c8cc/tests/test_model_tpot.py"
+```
+
+独立追加校验源码 `/tmp/veadk-tpot-probe/verify_metadata.py`：
+
+```python
+import json
+from pathlib import Path
+root = Path('/tmp/veadk-tpot-probe')
+for scenario in ['normal', 'tail', 'length']:
+    d = json.loads((root / f'results-{scenario}' / 'observation.json').read_text())
+    calls = [s for s in d['spans'] if s['name'] == 'call_llm']
+    assert len(calls) == 1
+    assert calls[0]['attributes']['gen_ai.request.model'] == f'tpot-probe-{scenario}'
+    assert calls[0]['attributes']['gen_ai.usage.output_tokens'] == 100
+request = json.loads((root / 'request.json').read_text())
+assert request['stream'] is True and request['include_usage'] is True
+assert request['path'] == '/api/v3/chat/completions'
+print('PASS: streamed request/include_usage and final output_tokens=100 for normal/tail/length')
+```
+
+| 本轮验证 | 实际结果 |
+| --- | --- |
+| Java main core 隔离构建 | BUILD SUCCESS；未跑 example 模块或全仓测试 |
+| Java 相关回归 | 46 tests，Failures=0，Errors=0，Skipped=0 |
+| 正常 / 尾部 5 秒 / length | 三项均返回 hello world；各一条 call_llm，output_tokens=100；model_request 与 TPOT 属性/Histogram 均缺失 |
+| 缺终态 | 保留 IllegalStateException: Ark stream ended without a finish reason.；无 TPOT |
+| 观测与请求校验 | Reader 采到 probe.reader_check 与 ADK 指标；stream=true、include_usage=true；verify.py 与 verify_metadata.py 均 PASS |
+| Python 源 MR | 72 passed, 36 warnings in 6.89s；警告为依赖弃用提示，未改源实现/测试 |
+
+**验证边界：** 这是主分支缺口复验；Java 新 TPOT 的精确值、采样关闭、并发重试、故障注入和成功清理验收仍须在实现后完成。真实云服务未调用：受控 SSE 用于可重复验证，任务未指定真实模型端点；不能以本地结果证明云端推理计数范围或清理可观测性。无 AgentKit 控制台交互，沿用本地 Agent/user/session 标识。
