@@ -70,6 +70,8 @@ public final class ArkLlm extends BaseLlm implements AutoCloseable {
     private final Dispatcher dispatcher;
     private final ConnectionPool connectionPool;
     private final ArkLlmConfig config;
+    private final ArkObservedServiceFactory observedServiceFactory =
+            new ArkObservedServiceFactory();
     private ChatCompletionRequest.ChatCompletionRequestThinking thinking = null;
 
     public ArkLlm(String modelName) {
@@ -85,15 +87,7 @@ public final class ArkLlm extends BaseLlm implements AutoCloseable {
         this.config = config;
         this.dispatcher = new Dispatcher();
         this.connectionPool = new ConnectionPool(5, 1, TimeUnit.SECONDS);
-        ArkService.Builder arkServiceBuilder =
-                ArkService.builder()
-                        .apiKey(config.getApiKey())
-                        .dispatcher(dispatcher)
-                        .connectionPool(connectionPool);
-        if (StringUtils.isNotBlank(config.getApiBase())) {
-            arkServiceBuilder.baseUrl(config.getApiBase());
-        }
-        this.arkService = arkServiceBuilder.build();
+        this.arkService = observedServiceFactory.create(config, dispatcher, connectionPool);
         if (StringUtils.isNotBlank(config.getThinking())) {
             this.thinking =
                     new ChatCompletionRequest.ChatCompletionRequestThinking(config.getThinking());
@@ -147,18 +141,34 @@ public final class ArkLlm extends BaseLlm implements AutoCloseable {
 
     /**
      * Handle streaming content generation
-     * @param arkRequest The Ark completion request
+     * @param request The Ark completion request
      * @return Flowable of LlmResponse objects
      */
-    private Flowable<LlmResponse> generateContentStreaming(ChatCompletionRequest arkRequest) {
+    private Flowable<LlmResponse> generateContentStreaming(ChatCompletionRequest request) {
         return Flowable.defer(
                 () -> {
+                    ChatCompletionRequest arkRequest = copyStreamingRequest(request);
+                    ArkStreamingObservation observation =
+                            new ArkStreamingObservation(arkRequest.getModel());
+                    String observationKey = observedServiceFactory.register(observation);
                     StringBuilder accumulatedText = new StringBuilder();
                     StringBuilder partialText = new StringBuilder();
                     Map<Integer, ChatToolCall> toolCalls = new TreeMap<>();
                     Usage[] usage = {null};
                     boolean[] finished = {false};
-                    return Flowable.fromPublisher(arkService.streamChatCompletion(arkRequest))
+                    return Flowable.defer(
+                                    () ->
+                                            Flowable.fromPublisher(
+                                                    observationKey == null
+                                                            ? arkService.streamChatCompletion(
+                                                                    arkRequest)
+                                                            : arkService.streamChatCompletion(
+                                                                    arkRequest,
+                                                                    Map.of(
+                                                                            ArkObservedServiceFactory
+                                                                                    .HEADER,
+                                                                            observationKey))))
+                            .doOnNext(observation::observe)
                             .concatMap(
                                     chunk -> {
                                         if (chunk.getUsage() != null) {
@@ -193,8 +203,30 @@ public final class ArkLlm extends BaseLlm implements AutoCloseable {
                                                                 accumulatedText.toString(),
                                                                 new ArrayList<>(toolCalls.values()),
                                                                 usage[0]));
-                                            }));
+                                            }))
+                            .doOnComplete(observation::complete)
+                            .doOnError(ignored -> observation.invalidate())
+                            .doOnCancel(observation::invalidate)
+                            .doFinally(() -> observedServiceFactory.forget(observationKey));
                 });
+    }
+
+    private ChatCompletionRequest copyStreamingRequest(ChatCompletionRequest source) {
+        // Copy the fields populated by toArkRequest without rerunning tool declarations or
+        // serializing prompt content. ArkService mutates only the request's stream flag.
+        ChatCompletionRequest copy =
+                ChatCompletionRequest.builder()
+                        .model(source.getModel())
+                        .messages(source.getMessages())
+                        .build();
+        copy.setTemperature(source.getTemperature());
+        copy.setTopP(source.getTopP());
+        copy.setMaxTokens(source.getMaxTokens());
+        copy.setResponseFormat(source.getResponseFormat());
+        copy.setThinking(source.getThinking());
+        copy.setTools(source.getTools());
+        copy.setStreamOptions(source.getStreamOptions());
+        return copy;
     }
 
     /**

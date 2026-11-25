@@ -217,7 +217,7 @@ class ArkLlmTest {
                         createMockTextChunk("Hello "),
                         createMockTextChunk("World!"),
                         createStopChunk());
-        when(arkService.streamChatCompletion(any(ChatCompletionRequest.class)))
+        when(arkService.streamChatCompletion(any(ChatCompletionRequest.class), any()))
                 .thenReturn(chunkFlowable);
 
         Flowable<LlmResponse> responseFlowable = arkLlm.generateContent(llmRequest, true);
