@@ -42,12 +42,13 @@ public final class FallbackLlm extends BaseLlm implements AutoCloseable {
     @Override
     public Flowable<LlmResponse> generateContent(LlmRequest request, boolean stream) {
         Objects.requireNonNull(request, "request must be set");
-        return attempt(request, stream, 0);
+        return ModelResponseId.trace(() -> attempt(request, stream, 0));
     }
 
     private Flowable<LlmResponse> attempt(LlmRequest request, boolean stream, int index) {
         return Flowable.defer(
                 () -> {
+                    ModelResponseId.beginAttempt();
                     boolean[] emitted = {false};
                     BaseLlm current = models.get(index);
                     return Flowable.defer(

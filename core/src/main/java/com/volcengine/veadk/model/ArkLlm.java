@@ -17,6 +17,7 @@ package com.volcengine.veadk.model;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.adk.models.BaseLlm;
 import com.google.adk.models.BaseLlmConnection;
 import com.google.adk.models.LlmRequest;
@@ -28,6 +29,11 @@ import com.google.genai.types.FunctionDeclaration;
 import com.google.genai.types.GenerateContentResponseUsageMetadata;
 import com.google.genai.types.Part;
 import com.google.genai.types.Schema;
+import com.volcengine.ark.runtime.interceptor.AuthenticationInterceptor;
+import com.volcengine.ark.runtime.interceptor.BatchInterceptor;
+import com.volcengine.ark.runtime.interceptor.EncryptionInterceptor;
+import com.volcengine.ark.runtime.interceptor.RequestIdInterceptor;
+import com.volcengine.ark.runtime.interceptor.RetryInterceptor;
 import com.volcengine.ark.runtime.model.Usage;
 import com.volcengine.ark.runtime.model.completion.chat.ChatCompletionChunk;
 import com.volcengine.ark.runtime.model.completion.chat.ChatCompletionRequest;
@@ -38,6 +44,8 @@ import com.volcengine.ark.runtime.model.completion.chat.ChatMessage;
 import com.volcengine.ark.runtime.model.completion.chat.ChatMessageRole;
 import com.volcengine.ark.runtime.model.completion.chat.ChatTool;
 import com.volcengine.ark.runtime.model.completion.chat.ChatToolCall;
+import com.volcengine.ark.runtime.service.ArkApi;
+import com.volcengine.ark.runtime.service.ArkBaseService;
 import com.volcengine.ark.runtime.service.ArkService;
 import com.volcengine.veadk.utils.JSONUtil;
 import io.reactivex.rxjava3.core.Flowable;
@@ -52,6 +60,7 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import okhttp3.ConnectionPool;
 import okhttp3.Dispatcher;
+import okhttp3.OkHttpClient;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -67,6 +76,9 @@ public final class ArkLlm extends BaseLlm implements AutoCloseable {
     private static final Logger log = LoggerFactory.getLogger(ArkLlm.class);
 
     private final ArkService arkService;
+    private final OkHttpClient httpClient;
+    private final ObjectMapper arkMapper = ArkService.defaultObjectMapper();
+    private final String apiBase;
     private final Dispatcher dispatcher;
     private final ConnectionPool connectionPool;
     private final ArkLlmConfig config;
@@ -83,17 +95,27 @@ public final class ArkLlm extends BaseLlm implements AutoCloseable {
     public ArkLlm(ArkLlmConfig config) {
         super(Objects.requireNonNull(config, "config must be set.").getModelName());
         this.config = config;
+        this.apiBase =
+                config.getApiBase().endsWith("/") ? config.getApiBase() : config.getApiBase() + "/";
         this.dispatcher = new Dispatcher();
         this.connectionPool = new ConnectionPool(5, 1, TimeUnit.SECONDS);
-        ArkService.Builder arkServiceBuilder =
-                ArkService.builder()
-                        .apiKey(config.getApiKey())
+        // Match ArkService.Builder defaults, including encryption, batch routing and timeouts.
+        this.httpClient =
+                new OkHttpClient.Builder()
+                        .addInterceptor(new AuthenticationInterceptor(config.getApiKey()))
+                        .addInterceptor(new EncryptionInterceptor(config.getApiKey(), apiBase))
+                        .addInterceptor(new RequestIdInterceptor())
+                        .addInterceptor(new RetryInterceptor(ArkBaseService.DEFAULT_RETRY_TIMES))
+                        .addInterceptor(new BatchInterceptor())
                         .dispatcher(dispatcher)
-                        .connectionPool(connectionPool);
-        if (StringUtils.isNotBlank(config.getApiBase())) {
-            arkServiceBuilder.baseUrl(config.getApiBase());
-        }
-        this.arkService = arkServiceBuilder.build();
+                        .connectionPool(connectionPool)
+                        .readTimeout(
+                                ArkBaseService.DEFAULT_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS)
+                        .callTimeout(
+                                ArkBaseService.DEFAULT_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS)
+                        .connectTimeout(ArkBaseService.DEFAULT_CONNECT_TIMEOUT)
+                        .build();
+        this.arkService = createService(httpClient);
         if (StringUtils.isNotBlank(config.getThinking())) {
             this.thinking =
                     new ChatCompletionRequest.ChatCompletionRequestThinking(config.getThinking());
@@ -126,23 +148,68 @@ public final class ArkLlm extends BaseLlm implements AutoCloseable {
     @Override
     public Flowable<LlmResponse> generateContent(LlmRequest llmRequest, boolean stream) {
         if (config.getApi() == ArkLlmConfig.Api.RESPONSES) {
-            return new ArkResponsesAdapter(arkService, config).generate(llmRequest, stream);
+            return new ArkResponsesAdapter(attempt -> serviceForAttempt(attempt, false), config)
+                    .generate(llmRequest, stream);
         }
-        // Convert ADK request to Ark request format
-        ChatCompletionRequest arkRequest = toArkRequest(llmRequest);
-        if (stream) {
-            arkRequest.setStreamOptions(
-                    ChatCompletionRequest.ChatCompletionRequestStreamOptions.of(true));
-            log.debug(
-                    "Sending streaming generateContent request to model {}", arkRequest.getModel());
-            // Handle streaming response
-            return generateContentStreaming(arkRequest);
-        } else {
-            log.debug("Sending generateContent request to model {}", arkRequest.getModel());
-            // Handle non-streaming response
-            return Flowable.fromCallable(() -> arkService.createChatCompletion(arkRequest))
-                    .map(this::toLlmResponse);
-        }
+        // Preserve eager request validation while keeping SDK-mutated requests per subscription.
+        ChatCompletionRequest template = toArkRequest(llmRequest);
+        return ModelResponseId.trace(
+                () -> {
+                    ModelResponseId.Attempt attempt = ModelResponseId.beginAttempt();
+                    ArkService service = serviceForAttempt(attempt, true);
+                    // The SDK mutates stream options, so requests must not be shared by
+                    // subscriptions.
+                    ChatCompletionRequest arkRequest = copyChatRequest(template);
+                    if (stream) {
+                        arkRequest.setStreamOptions(
+                                ChatCompletionRequest.ChatCompletionRequestStreamOptions.of(true));
+                        log.debug(
+                                "Sending streaming generateContent request to model {}",
+                                arkRequest.getModel());
+                        return generateContentStreaming(arkRequest, service, attempt);
+                    }
+                    log.debug("Sending generateContent request to model {}", arkRequest.getModel());
+                    return Flowable.fromCallable(() -> service.createChatCompletion(arkRequest))
+                            .doOnNext(raw -> attempt.body(raw.getId()))
+                            .map(this::toLlmResponse);
+                });
+    }
+
+    private static ChatCompletionRequest copyChatRequest(ChatCompletionRequest template) {
+        // Copy the fields mapped by toArkRequest. The SDK mutates only the request envelope;
+        // keep messages, tools and structured output intact rather than round-tripping JSON.
+        return ChatCompletionRequest.builder()
+                .model(template.getModel())
+                .messages(template.getMessages())
+                .temperature(template.getTemperature())
+                .topP(template.getTopP())
+                .maxTokens(template.getMaxTokens())
+                .responseFormat(template.getResponseFormat())
+                .thinking(template.getThinking())
+                .tools(template.getTools())
+                .build();
+    }
+
+    private ArkService createService(OkHttpClient client) {
+        return new ArkService(
+                ArkService.defaultRetrofit(client, arkMapper, apiBase, null).create(ArkApi.class),
+                dispatcher.executorService());
+    }
+
+    private ArkService serviceForAttempt(ModelResponseId.Attempt attempt, boolean chat) {
+        if (!attempt.recording()) return arkService;
+        OkHttpClient client =
+                httpClient
+                        .newBuilder()
+                        .addInterceptor(
+                                chain -> {
+                                    attempt.reset();
+                                    okhttp3.Response response = chain.proceed(chain.request());
+                                    if (chat) attempt.header(response.header("x-request-id"));
+                                    return response;
+                                })
+                        .build();
+        return createService(client);
     }
 
     /**
@@ -150,7 +217,8 @@ public final class ArkLlm extends BaseLlm implements AutoCloseable {
      * @param arkRequest The Ark completion request
      * @return Flowable of LlmResponse objects
      */
-    private Flowable<LlmResponse> generateContentStreaming(ChatCompletionRequest arkRequest) {
+    private Flowable<LlmResponse> generateContentStreaming(
+            ChatCompletionRequest arkRequest, ArkService service, ModelResponseId.Attempt attempt) {
         return Flowable.defer(
                 () -> {
                     StringBuilder accumulatedText = new StringBuilder();
@@ -158,7 +226,8 @@ public final class ArkLlm extends BaseLlm implements AutoCloseable {
                     Map<Integer, ChatToolCall> toolCalls = new TreeMap<>();
                     Usage[] usage = {null};
                     boolean[] finished = {false};
-                    return Flowable.fromPublisher(arkService.streamChatCompletion(arkRequest))
+                    return Flowable.fromPublisher(service.streamChatCompletion(arkRequest))
+                            .doOnNext(chunk -> attempt.body(chunk.getId()))
                             .concatMap(
                                     chunk -> {
                                         if (chunk.getUsage() != null) {

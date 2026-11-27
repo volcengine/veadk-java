@@ -30,10 +30,13 @@ import com.volcengine.ark.runtime.exception.ArkHttpException;
 import com.volcengine.ark.runtime.model.responses.common.ResponsesThinking;
 import com.volcengine.ark.runtime.model.responses.content.OutputContentItemText;
 import com.volcengine.ark.runtime.model.responses.event.ErrorEvent;
+import com.volcengine.ark.runtime.model.responses.event.StreamEvent;
 import com.volcengine.ark.runtime.model.responses.event.outputtext.OutputTextDeltaEvent;
 import com.volcengine.ark.runtime.model.responses.event.response.ResponseCompletedEvent;
+import com.volcengine.ark.runtime.model.responses.event.response.ResponseCreatedEvent;
 import com.volcengine.ark.runtime.model.responses.event.response.ResponseFailedEvent;
 import com.volcengine.ark.runtime.model.responses.event.response.ResponseInCompleteEvent;
+import com.volcengine.ark.runtime.model.responses.event.response.ResponseInProgressEvent;
 import com.volcengine.ark.runtime.model.responses.item.BaseItem;
 import com.volcengine.ark.runtime.model.responses.item.InputItem;
 import com.volcengine.ark.runtime.model.responses.item.ItemEasyMessage;
@@ -55,20 +58,26 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
+import java.util.function.Function;
 
 /** Stateless per-request bridge to the Ark SDK Responses API. */
 final class ArkResponsesAdapter {
     private static final String EXPIRED = "InvalidParameter.PreviousResponseNotFound";
-    private final ArkService service;
+    private final Function<ModelResponseId.Attempt, ArkService> services;
     private final ArkLlmConfig config;
 
     ArkResponsesAdapter(ArkService service, ArkLlmConfig config) {
-        this.service = service;
+        this(attempt -> service, config);
+    }
+
+    ArkResponsesAdapter(
+            Function<ModelResponseId.Attempt, ArkService> services, ArkLlmConfig config) {
+        this.services = services;
         this.config = config;
     }
 
     Flowable<LlmResponse> generate(LlmRequest request, boolean stream) {
-        return Flowable.defer(
+        return ModelResponseId.trace(
                 () -> {
                     CreateResponsesRequest wire = toRequest(request, true);
                     boolean[] output = {false};
@@ -93,13 +102,21 @@ final class ArkResponsesAdapter {
 
     private Flowable<LlmResponse> attempt(
             LlmRequest request, CreateResponsesRequest wire, boolean stream, boolean[] output) {
+        ModelResponseId.Attempt id = ModelResponseId.beginAttempt();
+        ArkService service = services.apply(id);
         if (!stream) {
             return Flowable.fromCallable(() -> service.createResponse(wire))
+                    .doOnNext(raw -> id.body(raw.getId()))
                     .map(raw -> toResponse(raw, request));
         }
         wire.setStream(true);
         boolean[] completed = {false};
         return Flowable.defer(() -> Flowable.fromPublisher(service.streamResponse(wire)))
+                .doOnNext(
+                        event -> {
+                            ResponseObject raw = eventResponse(event);
+                            if (raw != null) id.body(raw.getId());
+                        })
                 .takeUntil(
                         event ->
                                 event instanceof ResponseCompletedEvent
@@ -157,6 +174,15 @@ final class ArkResponsesAdapter {
                                                         new IllegalStateException(
                                                                 "Ark Responses stream ended without"
                                                                         + " completion."))));
+    }
+
+    private static ResponseObject eventResponse(StreamEvent event) {
+        if (event instanceof ResponseCreatedEvent created) return created.getResponse();
+        if (event instanceof ResponseInProgressEvent progress) return progress.getResponse();
+        if (event instanceof ResponseCompletedEvent done) return done.getResponse();
+        if (event instanceof ResponseFailedEvent failed) return failed.getResponse();
+        if (event instanceof ResponseInCompleteEvent incomplete) return incomplete.getResponse();
+        return null;
     }
 
     private CreateResponsesRequest toRequest(LlmRequest request, boolean reuse) {
