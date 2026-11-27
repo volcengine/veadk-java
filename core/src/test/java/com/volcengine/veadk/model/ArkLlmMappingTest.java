@@ -50,6 +50,7 @@ import java.lang.reflect.Field;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -85,12 +86,12 @@ class ArkLlmMappingTest {
 
     @Test
     void streamingRequestTransmitsParametersAndRequestsUsage() {
-        when(service.streamChatCompletion(any()))
+        when(service.streamChatCompletion(any(), any()))
                 .thenReturn(io.reactivex.Flowable.just(chunk("ok", null, "stop", null)));
         llm.generateContent(configuredRequest(), true).toList().blockingGet();
         ArgumentCaptor<ChatCompletionRequest> captor =
                 ArgumentCaptor.forClass(ChatCompletionRequest.class);
-        verify(service).streamChatCompletion(captor.capture());
+        verify(service).streamChatCompletion(captor.capture(), any());
         assertParameters(captor.getValue());
         assertThat(captor.getValue().getStreamOptions().getIncludeUsage()).isTrue();
     }
@@ -264,7 +265,7 @@ class ArkLlmMappingTest {
 
     @Test
     void usageSurvivesAnEmptyChoicesTrailerAndIsOnlyEmittedOnce() {
-        when(service.streamChatCompletion(any()))
+        when(service.streamChatCompletion(any(), any()))
                 .thenReturn(
                         io.reactivex.Flowable.just(
                                 chunk("hello", null, null, new Usage(10, 1, 11)),
@@ -298,7 +299,7 @@ class ArkLlmMappingTest {
                                 null),
                         chunk(null, null, "tool_calls", null),
                         usageChunk(new Usage(10, 4, 14)));
-        when(service.streamChatCompletion(any()))
+        when(service.streamChatCompletion(any(), any()))
                 .thenReturn(io.reactivex.Flowable.fromIterable(chunks));
         var stream = llm.generateContent(request(), true);
         for (int iteration = 0; iteration < 2; iteration++) {
@@ -316,7 +317,7 @@ class ArkLlmMappingTest {
 
     @Test
     void streamFailureAfterPartialOutputDoesNotEmitACompletedResponse() {
-        when(service.streamChatCompletion(any()))
+        when(service.streamChatCompletion(any(), any()))
                 .thenReturn(
                         io.reactivex.Flowable.concat(
                                 io.reactivex.Flowable.just(
@@ -335,9 +336,83 @@ class ArkLlmMappingTest {
 
     @Test
     void truncatedStreamWithoutFinishReasonDoesNotSilentlySucceed() {
-        when(service.streamChatCompletion(any()))
+        when(service.streamChatCompletion(any(), any()))
                 .thenReturn(io.reactivex.Flowable.just(chunk("unfinished", null, null, null)));
         llm.generateContent(request(), true).test().assertError(IllegalStateException.class);
+    }
+
+    @Test
+    void telemetryInitializationFailurePreservesStreamingContentAndUsage() {
+        var original = com.google.adk.telemetry.Tracing.getTracer();
+        var broken = mock(io.opentelemetry.api.trace.Tracer.class);
+        when(broken.spanBuilder(any())).thenThrow(new IllegalStateException("fixture telemetry"));
+        com.google.adk.telemetry.Tracing.setTracerForTesting(broken);
+        try {
+            when(service.streamChatCompletion(any(), any()))
+                    .thenReturn(
+                            io.reactivex.Flowable.just(
+                                    chunk("hello", null, null, null),
+                                    chunk(" world", null, "stop", null),
+                                    usageChunk(new Usage(10, 100, 110))));
+            var responses = llm.generateContent(request(), true).toList().blockingGet();
+            assertThat(responses).hasSize(2);
+            assertThat(responses.get(1).content().orElseThrow().parts().orElseThrow().get(0).text())
+                    .contains("hello world");
+            assertUsage(responses.get(1), 10, 100, 110);
+        } finally {
+            com.google.adk.telemetry.Tracing.setTracerForTesting(original);
+        }
+    }
+
+    @Test
+    void retriesUseDistinctRequestsAndDoNotLeakObservationAssociations() throws Exception {
+        var attempts = new java.util.concurrent.atomic.AtomicInteger();
+        when(service.streamChatCompletion(any(), any()))
+                .thenAnswer(
+                        invocation -> {
+                            if (attempts.getAndIncrement() == 0)
+                                return io.reactivex.Flowable.error(
+                                        new IllegalStateException("fixture attempt"));
+                            return io.reactivex.Flowable.just(
+                                    chunk("hello", null, "stop", new Usage(10, 2, 12)));
+                        });
+        var responses = llm.generateContent(request(), true).retry(1).toList().blockingGet();
+        assertThat(responses).hasSize(2);
+        ArgumentCaptor<ChatCompletionRequest> requests =
+                ArgumentCaptor.forClass(ChatCompletionRequest.class);
+        verify(service, times(2)).streamChatCompletion(requests.capture(), any());
+        assertThat(requests.getAllValues().get(0)).isNotSameAs(requests.getAllValues().get(1));
+        assertThat(observedFactory().pendingCount()).isZero();
+    }
+
+    @Test
+    void earlyTerminationAndTimeoutPreservePartialOutputAndReleaseAssociations() throws Exception {
+        when(service.streamChatCompletion(any(), any()))
+                .thenReturn(
+                        io.reactivex.Flowable.concat(
+                                io.reactivex.Flowable.just(
+                                        chunk(
+                                                "This is more than thirty characters of partial"
+                                                        + " output.",
+                                                null,
+                                                null,
+                                                null)),
+                                io.reactivex.Flowable.never()));
+        llm.generateContent(request(), true).take(1).test().assertComplete().assertValueCount(1);
+        assertThat(observedFactory().pendingCount()).isZero();
+        var scheduler = new io.reactivex.rxjava3.schedulers.TestScheduler();
+        var subscriber =
+                llm.generateContent(request(), true).timeout(1, TimeUnit.SECONDS, scheduler).test();
+        subscriber.assertValueCount(1).assertNotComplete();
+        scheduler.advanceTimeBy(1, TimeUnit.SECONDS);
+        subscriber.assertError(java.util.concurrent.TimeoutException.class).assertValueCount(1);
+        assertThat(observedFactory().pendingCount()).isZero();
+    }
+
+    private ArkObservedServiceFactory observedFactory() throws Exception {
+        Field field = ArkLlm.class.getDeclaredField("observedServiceFactory");
+        field.setAccessible(true);
+        return (ArkObservedServiceFactory) field.get(llm);
     }
 
     @Test
